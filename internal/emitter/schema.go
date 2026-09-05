@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/geo-suite/geovisor/internal/tir"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 // JSONSchemaDialect is the schema dialect used by emitter payloads.

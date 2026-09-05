@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://geo-suite.github.io/geovisor/schemas/openai-function-tools.schema.json",
+  "$id": "https://wheelsmif.github.io/geovisor/schemas/openai-function-tools.schema.json",
   "title": "OpenAI Responses API Function Tool Array",
   "type": "array",
   "items": {

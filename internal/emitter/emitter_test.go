@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/geo-suite/geovisor/internal/tir"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 func TestDefaultRegistry(t *testing.T) {

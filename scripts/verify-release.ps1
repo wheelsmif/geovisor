@@ -9,7 +9,7 @@ try {
     Push-Location $root
     $env:GOTOOLCHAIN = "go$((Get-Content .go-version -Raw).Trim())"
     $version = "v0.0.0-test"
-    $ldflags = "-buildid= -X github.com/geo-suite/geovisor/internal/version.Version=$version"
+    $ldflags = "-buildid= -X github.com/wheelsmif/geovisor/internal/version.Version=$version"
 
     go build -trimpath -buildvcs=false -ldflags $ldflags -o (Join-Path $work "geovisor-a.exe") ./cmd/geovisor
     go build -trimpath -buildvcs=false -ldflags $ldflags -o (Join-Path $work "geovisor-b.exe") ./cmd/geovisor
@@ -32,4 +32,17 @@ try {
         $null = $process.Start()
         $value = $process.StandardError.ReadToEnd().Trim()
         $process.WaitForExit()
-        if ($pro
+        if ($process.ExitCode -ne 0) { throw "$Path --version failed" }
+        return $value
+    }
+    $geovisorVersion = Read-Version $geovisorPath
+    $gvVersion = Read-Version $gvPath
+    if ($geovisorVersion -ne $version -or $gvVersion -ne $version) {
+        throw "injected version mismatch: geovisor=$geovisorVersion gv=$gvVersion"
+    }
+}
+finally {
+    Pop-Location
+    $env:GOTOOLCHAIN = $oldToolchain
+    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+}

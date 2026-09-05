@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/geo-suite/geovisor/internal/browser"
-	"github.com/geo-suite/geovisor/internal/compiler"
-	"github.com/geo-suite/geovisor/internal/emitter"
-	"github.com/geo-suite/geovisor/internal/output"
-	"github.com/geo-suite/geovisor/internal/tir"
+	"github.com/wheelsmif/geovisor/internal/browser"
+	"github.com/wheelsmif/geovisor/internal/compiler"
+	"github.com/wheelsmif/geovisor/internal/emitter"
+	"github.com/wheelsmif/geovisor/internal/output"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 type stubSource struct {

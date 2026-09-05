@@ -2,14 +2,23 @@
   "name": "geovisor-client",
   "private": true,
   "version": "0.0.0",
+  "description": "Deterministic browser-to-tool-contract extraction payload for GEO-Visor",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wheelsmif/geovisor.git"
+  },
+  "homepage": "https://github.com/wheelsmif/geovisor#readme",
+  "bugs": {
+    "url": "https://github.com/wheelsmif/geovisor/issues"
+  },
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node client/scripts/build.mjs",
     "verify:bundle": "node client/scripts/build.mjs --verify",
     "test": "npm run build && node --test client/test/*.test.mjs",
-    "check": "npm run typecheck && npm test && npm run verify:bundle"
+    "check": "npm run typecheck && npm run verify:bundle && npm test"
   },
   "dependencies": {
     "@medv/finder": "4.0.2"

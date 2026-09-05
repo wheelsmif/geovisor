@@ -85,10 +85,10 @@ validated by successful builds and checksums.
 
 ## Issues and changes
 
-Use the repository issue tracker for defects and proposals. Include concise
-reproduction steps and expected behavior, but never post credentials, private
-URLs, captured sensitive values, or security exploit details. Follow
-`SECURITY.md` for vulnerabilities.
+Use the [repository issue tracker](https://github.com/wheelsmif/geovisor/issues)
+for defects and proposals. Include concise reproduction steps and expected
+behavior, but never post credentials, private URLs, captured sensitive values,
+or security exploit details. Follow `SECURITY.md` for vulnerabilities.
 
 Unless explicitly stated otherwise, intentionally submitted contributions are
 licensed under Apache-2.0 as described by Section 5 of `LICENSE`.

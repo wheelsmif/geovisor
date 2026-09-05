@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/geo-suite/geovisor/internal/browser"
-	"github.com/geo-suite/geovisor/internal/emitter"
+	"github.com/wheelsmif/geovisor/internal/browser"
+	"github.com/wheelsmif/geovisor/internal/emitter"
 )
 
 const (

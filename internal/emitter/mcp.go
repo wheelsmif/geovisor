@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/geo-suite/geovisor/internal/tir"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 // MCPSpecVersion is the protocol revision used by the static tools/list result.

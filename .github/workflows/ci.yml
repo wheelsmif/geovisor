@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.6"
+  NODE_VERSION: "24.15.0"
+
+jobs:
+  quality:
+    name: Quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run verify:bundle
+      - run: npm test
+      - name: Check gofmt
+        shell: bash
+        if: runner.os != 'Windows'
+        run: test -z "$(gofmt -l .)"
+      - name: Check gofmt
+        shell: pwsh
+        if: runner.os == 'Windows'
+        run: |
+          $unformatted = gofmt -l .
+          if ($unformatted) {
+            $unformatted | Write-Error
+            exit 1
+          }
+      - run: go vet ./...
+      - name: Test packages and artifact schemas
+        run: go test ./...
+
+  race-security:
+    name: Linux race and security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install --yes gcc libc6-dev
+      - run: npm ci
+      - run: go test -race ./...
+      - name: Report compiler and emitter benchmark
+        run: go test ./internal/integration -run '^$' -bench '^BenchmarkCorpusCompileAndEmit$' -benchmem -count=1
+      - run: npm audit --audit-level=high
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
+  cross-build:
+    name: Source cross-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - run: sh ./scripts/build-release.sh v0.0.0-ci
+      - name: Verify six archives and checksums
+        run: |
+          test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 6
+          cd dist
+          sha256sum --check checksums.txt

@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/geo-suite/geovisor/internal/compiler"
-	"github.com/geo-suite/geovisor/internal/emitter"
-	"github.com/geo-suite/geovisor/internal/observation"
-	"github.com/geo-suite/geovisor/internal/tir"
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/wheelsmif/geovisor/internal/compiler"
+	"github.com/wheelsmif/geovisor/internal/emitter"
+	"github.com/wheelsmif/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 const fixturePath = "testdata/corpus/forms.html"
@@ -148,7 +148,7 @@ func validateSchema(t *testing.T, root, schemaName string, payload []byte) {
 			t.Fatalf("add schema resource %s: %v", name, err)
 		}
 	}
-	schemaID := fmt.Sprintf("https://geo-suite.github.io/geovisor/schemas/%s", schemaName)
+	schemaID := fmt.Sprintf("https://wheelsmif.github.io/geovisor/schemas/%s", schemaName)
 	schema, err := compiler.Compile(schemaID)
 	if err != nil {
 		t.Fatalf("compile schema %s: %v", schemaName, err)

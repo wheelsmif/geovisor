@@ -7,10 +7,10 @@ trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir -p "$work"
 cd "$root"
 export GOTOOLCHAIN
-GOTOOLCHAIN=$(cat .go-version)
+GOTOOLCHAIN=go$(cat .go-version)
 
 version=v0.0.0-test
-ldflags="-buildid= -X github.com/geo-suite/geovisor/internal/version.Version=$version"
+ldflags="-buildid= -X github.com/wheelsmif/geovisor/internal/version.Version=$version"
 common="-trimpath -buildvcs=false"
 
 go build $common -ldflags "$ldflags" -o "$work/geovisor-a" ./cmd/geovisor

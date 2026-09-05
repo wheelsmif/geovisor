@@ -25,7 +25,7 @@ try {
     Push-Location $root
     $env:CGO_ENABLED = "0"
     $env:GOTOOLCHAIN = "go$toolchain"
-    $ldflags = "-s -w -buildid= -X github.com/geo-suite/geovisor/internal/version.Version=$Version"
+    $ldflags = "-s -w -buildid= -X github.com/wheelsmif/geovisor/internal/version.Version=$Version"
 
     foreach ($target in $targets) {
         $os, $arch = $target
@@ -36,6 +36,11 @@ try {
 
         go build -trimpath -buildvcs=false -ldflags $ldflags -o (Join-Path $stage "geovisor$suffix") ./cmd/geovisor
         go build -trimpath -buildvcs=false -ldflags $ldflags -o (Join-Path $stage "gv$suffix") ./cmd/geovisor
+        $metadata = go version -m (Join-Path $stage "geovisor$suffix") | Out-String
+        if ($metadata -notmatch "github.com/wheelsmif/geovisor" -or
+            $metadata -notmatch "CGO_ENABLED=0") {
+            throw "invalid Go build metadata for $os/$arch"
+        }
         Copy-Item LICENSE, README.md, SECURITY.md, CONTRIBUTING.md -Destination $stage
 
         $archive = Join-Path $dist "geovisor_${Version}_${os}_${arch}.tar.gz"

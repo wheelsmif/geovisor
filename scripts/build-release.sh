@@ -19,7 +19,7 @@ export GOTOOLCHAIN
 GOTOOLCHAIN=go$(cat "$root/.go-version")
 host_os=$(go env GOHOSTOS)
 host_arch=$(go env GOHOSTARCH)
-ldflags="-s -w -buildid= -X github.com/geo-suite/geovisor/internal/version.Version=$version"
+ldflags="-s -w -buildid= -X github.com/wheelsmif/geovisor/internal/version.Version=$version"
 
 cd "$root"
 for target in windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
@@ -33,6 +33,9 @@ for target in windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 d
 
   go build -trimpath -buildvcs=false -ldflags "$ldflags" -o "$stage/geovisor$suffix" ./cmd/geovisor
   go build -trimpath -buildvcs=false -ldflags "$ldflags" -o "$stage/gv$suffix" ./cmd/geovisor
+  metadata=$(go version -m "$stage/geovisor$suffix")
+  printf '%s\n' "$metadata" | grep -F "github.com/wheelsmif/geovisor" >/dev/null
+  printf '%s\n' "$metadata" | grep -F "CGO_ENABLED=0" >/dev/null
   cp LICENSE README.md SECURITY.md CONTRIBUTING.md "$stage/"
   tar -czf "$dist/geovisor_${version}_${GOOS}_${GOARCH}.tar.gz" -C "$stage" .
 

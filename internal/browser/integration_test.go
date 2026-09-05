@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/geo-suite/geovisor/internal/observation"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/wheelsmif/geovisor/internal/observation"
 )
 
 func TestLaunchObservesNestedShadowAndCrossOriginFrames(t *testing.T) {

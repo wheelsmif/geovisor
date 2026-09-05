@@ -20,7 +20,7 @@ try {
 
     if ($Security) {
         npm audit --audit-level=high
-        go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
     }
 }
 finally {

@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/geo-suite/geovisor/internal/cli"
+	"github.com/wheelsmif/geovisor/internal/cli"
 )
 
 func main() {

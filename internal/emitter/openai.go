@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/geo-suite/geovisor/internal/tir"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 // OpenAIToolShape identifies the selected unwrapped Responses API tool shape.

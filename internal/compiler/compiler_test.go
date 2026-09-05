@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/geo-suite/geovisor/internal/observation"
-	"github.com/geo-suite/geovisor/internal/tir"
+	"github.com/wheelsmif/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 func TestCompileAggregatesDeterministically(t *testing.T) {

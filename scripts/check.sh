@@ -14,7 +14,7 @@ done
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 export GOTOOLCHAIN
-GOTOOLCHAIN=$(cat .go-version)
+GOTOOLCHAIN=go$(cat .go-version)
 [ "$require_browser" -eq 0 ] || export GEOVISOR_REQUIRE_BROWSER=1
 
 npm ci
@@ -26,5 +26,5 @@ go test ./...
 
 if [ "$security" -eq 1 ]; then
   npm audit --audit-level=high
-  go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+  go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 fi

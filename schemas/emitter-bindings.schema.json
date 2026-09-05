@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://geo-suite.github.io/geovisor/schemas/emitter-bindings.schema.json",
+  "$id": "https://wheelsmif.github.io/geovisor/schemas/emitter-bindings.schema.json",
   "title": "GEO-Visor Browser Binding Companion",
   "type": "object",
   "additionalProperties": false,

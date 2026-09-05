@@ -3,7 +3,7 @@ package emitter
 import (
 	"context"
 
-	"github.com/geo-suite/geovisor/internal/tir"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 // CanonicalJSON delegates canonical output to tir.Marshal.

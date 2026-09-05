@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/geo-suite/geovisor/internal/observation"
 	"github.com/go-rod/rod/lib/launcher/flags"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/wheelsmif/geovisor/internal/observation"
 )
 
 func TestOwnedLauncherDisablesLeaklessAndPreservesIsolation(t *testing.T) {

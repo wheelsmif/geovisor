@@ -25,7 +25,7 @@ Both executable names are compiled from `./cmd/geovisor`. The requested
 version is injected through:
 
 ```text
--X github.com/geo-suite/geovisor/internal/version.Version=<version>
+-X github.com/wheelsmif/geovisor/internal/version.Version=<version>
 ```
 
 Builds use `-trimpath`, an empty Go build ID, `-buildvcs=false`, and

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/geo-suite/geovisor/internal/compiler"
-	"github.com/geo-suite/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/compiler"
+	"github.com/wheelsmif/geovisor/internal/observation"
 )
 
 const (

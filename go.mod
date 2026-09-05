@@ -1,4 +1,4 @@
-module github.com/geo-suite/geovisor
+module github.com/wheelsmif/geovisor
 
 go 1.26
 

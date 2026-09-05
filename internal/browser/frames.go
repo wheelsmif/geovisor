@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/geo-suite/geovisor/internal/compiler"
-	"github.com/geo-suite/geovisor/internal/observation"
-	"github.com/geo-suite/geovisor/internal/payload"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/wheelsmif/geovisor/internal/compiler"
+	"github.com/wheelsmif/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/payload"
 )
 
 const isolatedWorldName = "__geovisor_observer__"

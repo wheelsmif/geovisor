@@ -1,6 +1,7 @@
 # GEO-Visor
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/wheelsmif/geovisor/actions/workflows/ci.yml/badge.svg)](https://github.com/wheelsmif/geovisor/actions/workflows/ci.yml)
 
 GEO-Visor observes browser interfaces and produces deterministic tool contracts
 through a canonical, emitter-agnostic Tool Intermediate Representation (TIR).
@@ -21,6 +22,12 @@ Build from a source checkout:
 npm ci
 npm run verify:bundle
 go build -trimpath -o geovisor ./cmd/geovisor
+```
+
+Or install the latest source revision with Go:
+
+```sh
+go install github.com/wheelsmif/geovisor/cmd/geovisor@latest
 ```
 
 Release archives contain the same command under both `geovisor` and the shorter

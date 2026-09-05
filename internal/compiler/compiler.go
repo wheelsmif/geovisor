@@ -13,8 +13,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/geo-suite/geovisor/internal/observation"
-	"github.com/geo-suite/geovisor/internal/tir"
+	"github.com/wheelsmif/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
 // Input contains every observation batch for one browser session.

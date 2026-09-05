@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/geo-suite/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/observation"
 )
 
 func TestBrowserBundleInstallsStableExtractionGlobal(t *testing.T) {

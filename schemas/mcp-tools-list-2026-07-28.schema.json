@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://geo-suite.github.io/geovisor/schemas/mcp-tools-list-2026-07-28.schema.json",
+  "$id": "https://wheelsmif.github.io/geovisor/schemas/mcp-tools-list-2026-07-28.schema.json",
   "title": "MCP 2026-07-28 ListToolsResult",
   "type": "object",
   "additionalProperties": false,

@@ -11,8 +11,9 @@ Prefer the repository host's private vulnerability-reporting or security
 advisory feature when it is available. Do not publish secrets, exploit details,
 private URLs, captured page data, or credentials in a public issue.
 
-If no private reporting feature is available, open a minimal repository issue
-that asks maintainers for a private reporting channel. Include no sensitive
+If no private reporting feature is available, open a
+[minimal repository issue](https://github.com/wheelsmif/geovisor/issues) that
+asks maintainers for a private reporting channel. Include no sensitive
 technical details in that issue. The project does not currently publish a
 separate security contact URL or response-time guarantee.
 
