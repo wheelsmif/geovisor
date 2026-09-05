@@ -1,0 +1,33 @@
+{
+  "source": {
+    "kind": "launch_url",
+    "requestedUrl": "https://corpus.example/",
+    "finalUrl": "https://corpus.example/",
+    "stealthEnabled": false
+  },
+  "batches": [
+    {
+      "coverageReported": true,
+      "frames": [
+        {
+          "path": [],
+          "accessible": true,
+          "url": "https://corpus.example/",
+          "origin": "https://corpus.example"
+        },
+        {
+          "path": [
+            {
+              "index": 0,
+              "name": "restricted",
+              "src": "https://restricted.example/"
+            }
+          ],
+          "accessible": false,
+          "reason": "browser could not create an isolated execution world for this frame"
+        }
+      ],
+      "interactions": []
+    }
+  ]
+}

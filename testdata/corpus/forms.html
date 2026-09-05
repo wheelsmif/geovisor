@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Forms corpus</title></head>
+<body>
+  <main aria-label="Account settings">
+    <form aria-label="Profile form">
+      <label for="display-name">Display name</label>
+      <input id="display-name" required value="CURRENT-DISPLAY-NAME-SECRET">
+
+      <label for="nickname">Nickname</label>
+      <input id="nickname">
+
+      <label for="plan">Plan</label>
+      <select id="plan">
+        <option value="HIDDEN-BASIC-ID">Basic</option>
+        <option value="HIDDEN-PRO-ID">Pro</option>
+      </select>
+
+      <label><input type="checkbox" checked> Email alerts</label>
+
+      <label for="password">Password</label>
+      <input id="password" type="password" value="CURRENT-PASSWORD-SECRET">
+      <button type="submit">Save profile</button>
+    </form>
+
+    <section role="region" aria-label="Primary filters">
+      <input aria-label="Query" value="CURRENT-QUERY-SECRET">
+      <input aria-label="Query">
+    </section>
+    <section role="region" aria-label="Help filters">
+      <input aria-label="Query">
+    </section>
+
+    <div role="tablist" aria-label="Settings">
+      <button role="tab" aria-controls="general-panel">General</button>
+    </div>
+    <section id="general-panel" role="tabpanel">General settings</section>
+
+    <button command="show-modal" commandfor="help-dialog">Open help</button>
+    <dialog id="help-dialog" aria-label="Help dialog">Help</dialog>
+
+    <details>
+      <summary>Advanced options</summary>
+      <button type="button">Reset local options</button>
+    </details>
+  </main>
+</body>
+</html>

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>SPA quiet corpus</title></head>
+<body>
+  <main id="app" aria-label="SPA"></main>
+  <script>
+    setTimeout(() => {
+      const button = document.createElement("button");
+      button.setAttribute("aria-label", "Hydrated action");
+      button.textContent = "Hydrated";
+      document.querySelector("#app").append(button);
+    }, 75);
+  </script>
+</body>
+</html>

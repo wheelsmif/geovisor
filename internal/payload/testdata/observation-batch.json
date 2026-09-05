@@ -1,0 +1,73 @@
+{
+  "coverageReported": false,
+  "frames": [],
+  "interactions": [
+    {
+      "kind": "control",
+      "framePath": [],
+      "scope": [],
+      "role": "textbox",
+      "name": "Query",
+      "parameters": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": false,
+          "enum": [],
+          "properties": [],
+          "sourceOrder": 3
+        }
+      ],
+      "locators": [
+        {
+          "framePath": [],
+          "shadowPath": [],
+          "semantic": {
+            "scope": [],
+            "role": "textbox",
+            "name": "Query"
+          },
+          "css": "input",
+          "evidence": [
+            {
+              "kind": "accessibility",
+              "reference": "semantic:textbox",
+              "score": 0.88
+            },
+            {
+              "kind": "dom",
+              "reference": "css:input",
+              "score": 0.65
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "kind": "fill",
+          "inputParameter": "query",
+          "locatorIndexes": [
+            0
+          ],
+          "sideEffect": {
+            "class": "unknown",
+            "safeForExploration": false,
+            "rationale": "Changing a control may invoke page handlers; extraction never changes its value."
+          }
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "accessibility",
+          "reference": "name:aria-label",
+          "score": 0.96
+        },
+        {
+          "kind": "dom",
+          "reference": "element:input",
+          "score": 0.6
+        }
+      ]
+    }
+  ]
+}

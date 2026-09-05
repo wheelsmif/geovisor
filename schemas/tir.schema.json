@@ -1,0 +1,357 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://geo-suite.github.io/geovisor/schemas/tir.schema.json",
+  "title": "GEO-Visor Tool Intermediate Representation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "source", "frameCoverage", "tools", "warnings"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "source": { "$ref": "#/$defs/sourceMetadata" },
+    "frameCoverage": { "$ref": "#/$defs/frameCoverage" },
+    "tools": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/tool" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/warning" }
+    }
+  },
+  "$defs": {
+    "sourceMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "executionBoundary", "stealthEnabled"],
+      "properties": {
+        "kind": { "enum": ["launch_url", "cdp_attach"] },
+        "executionBoundary": { "const": "agent_owned" },
+        "requestedUrl": { "type": "string" },
+        "finalUrl": { "type": "string" },
+        "stealthEnabled": { "type": "boolean" }
+      }
+    },
+    "frameCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "frames", "uncovered"],
+      "properties": {
+        "status": { "enum": ["complete", "partial", "unavailable"] },
+        "frames": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/coveredFrame" }
+        },
+        "uncovered": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uncoveredFrame" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "partial" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": { "uncovered": { "minItems": 1 } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "status": { "const": "complete" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": { "uncovered": { "maxItems": 0 } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "status": { "const": "unavailable" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "frames": { "maxItems": 0 },
+              "uncovered": { "maxItems": 0 }
+            }
+          }
+        }
+      ]
+    },
+    "coveredFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/frameReference" }
+        },
+        "url": { "type": "string" },
+        "origin": { "type": "string" }
+      }
+    },
+    "uncoveredFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "reason"],
+      "properties": {
+        "path": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/frameReference" }
+        },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "frameReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "name": { "type": "string" },
+        "src": { "type": "string" }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "description",
+        "parameters",
+        "locatorCandidates",
+        "actionBindings",
+        "confidence",
+        "provenance"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "parameters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/parameter" }
+        },
+        "locatorCandidates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/locatorCandidate" }
+        },
+        "actionBindings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/actionBinding" }
+        },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "provenance": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/provenance" }
+        }
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "required", "enum", "properties"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "type": { "$ref": "#/$defs/valueType" },
+        "required": { "type": "boolean" },
+        "enum": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "items": { "$ref": "#/$defs/parameterShape" },
+        "properties": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/parameterProperty" }
+        }
+      }
+    },
+    "parameterShape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "enum", "properties"],
+      "properties": {
+        "type": { "$ref": "#/$defs/valueType" },
+        "enum": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "items": { "$ref": "#/$defs/parameterShape" },
+        "properties": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/parameterProperty" }
+        }
+      }
+    },
+    "parameterProperty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "required", "shape"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "shape": { "$ref": "#/$defs/parameterShape" }
+      }
+    },
+    "valueType": {
+      "enum": ["string", "number", "integer", "boolean", "object", "array"]
+    },
+    "locatorCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "framePath",
+        "shadowPath",
+        "confidence",
+        "provenance"
+      ],
+      "anyOf": [
+        { "required": ["semantic"] },
+        { "required": ["cssFallback"] }
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "framePath": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/pathNode" }
+        },
+        "shadowPath": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/pathNode" }
+        },
+        "semantic": { "$ref": "#/$defs/semanticLocator" },
+        "cssFallback": { "type": "string", "minLength": 1 },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "provenance": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/provenance" }
+        }
+      }
+    },
+    "pathNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["semantic"] },
+        { "required": ["cssFallback"] }
+      ],
+      "properties": {
+        "semantic": { "$ref": "#/$defs/semanticNode" },
+        "cssFallback": { "type": "string", "minLength": 1 }
+      }
+    },
+    "semanticLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "role"],
+      "properties": {
+        "scope": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/semanticNode" }
+        },
+        "role": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" }
+      }
+    },
+    "semanticNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role"],
+      "properties": {
+        "role": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" }
+      }
+    },
+    "actionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "locatorCandidateIds", "sideEffect"],
+      "properties": {
+        "action": { "enum": ["click", "fill", "select", "check"] },
+        "inputParameter": { "type": "string", "minLength": 1 },
+        "locatorCandidateIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "sideEffect": { "$ref": "#/$defs/sideEffect" }
+      }
+    },
+    "sideEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "safeForExploration"],
+      "properties": {
+        "class": {
+          "enum": [
+            "none",
+            "local_state",
+            "network",
+            "navigation",
+            "submission",
+            "unknown"
+          ]
+        },
+        "safeForExploration": { "type": "boolean" },
+        "rationale": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "class": { "enum": ["navigation", "submission"] }
+            },
+            "required": ["class"]
+          },
+          "then": {
+            "properties": {
+              "safeForExploration": { "const": false }
+            }
+          }
+        }
+      ]
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rationale": { "type": "string" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["dom", "accessibility", "page_metadata", "heuristic"]
+        },
+        "reference": { "type": "string" }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "framePath"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "toolId": { "type": "string", "minLength": 1 },
+        "framePath": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/frameReference" }
+        }
+      }
+    }
+  }
+}

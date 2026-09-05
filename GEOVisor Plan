@@ -1,0 +1,223 @@
+# PLANNING DIRECTIVE: GEO-VISOR ENGINE & EMITTER PIPELINE (v1.0.0-MVP)
+Document Control: Core Product & Architectural Specification
+Scope: Open-Source CLI, Deterministic Tool Compiler, & Multi-Format Emitter Engine
+
+---
+
+## 1. EXECUTIVE MANDATE & STRATEGIC OBJECTIVES
+
+### 1.1 Core Mission
+Build a lightweight, zero-LLM-overhead, single-binary CLI tool in Go (`geovisor`) that deterministically inspects active web pages (via Chromium DevTools Protocol), extracts human-centric UI elements (forms, navigation structures, dynamic interactive controls across Shadow DOM boundaries and frames), compiles them into a unified Tool Intermediate Representation (TIR), and emits strongly typed tool definitions across major agentic formats (WebMCP, Anthropic MCP static specs, and Universal OpenAI Function Calling).
+
+### 1.2 Core Architectural Axioms
+1. Zero LLM Dependency in Core Engine: The compilation process must be 100% deterministic, algorithmic, and local. Tool generation relies strictly on DOM introspection, event listener reflection, accessibility trees, Shadow DOM traversal, and non-LLM layout heuristics—not Vision LLM screenshots or token-heavy API calls.
+2. Viewport & Context Isolation: Operate strictly on a per-page/active-viewport context across frames. Do not inline external assets or recursively crawl linked external domains into the active tool manifest. Unsupported media (e.g., PDFs) are indexed as static resource pointers with specialist tool hints.
+3. Target Agnosticism via TIR: Never compile directly from DOM to a target output format. All raw DOM extractions are compiled into an internal Tool Intermediate Representation (TIR) before passing through targeted Emitters.
+4. Scoped Locator Strategy: Standardize locator generation around scoped hierarchy bindings (`ContainerLocator >> ARIA Locator`) to survive single-page application (SPA) DOM re-renders and avoid strict-mode locator collisions in downstream agent runtimes.
+5. Static Schema Emission: Operate as a pure static compiler/generator CLI (`visor inspect <url>`). Produce fully compliant static schema payloads (e.g., Anthropic MCP `tools/list` JSON, OpenAI function specs) without forcing the CLI to act as a long-running daemon server.
+
+---
+
+## 2. SYSTEM ARCHITECTURE & RUNTIME LIFECYCLE
+
+### 2.1 Component Breakdown
+
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                               GEO-VISOR ENGINE CORE                              │
+│                                                                                  │
+│   ┌─────────────────────┐       ┌──────────────────────┐                         │
+│   │   Go Host Daemon    │ ───►  │  go-rod / CDP Client │                         │
+│   │ (Cobra Orchestrator)│       │ (Stealth Headless)   │                         │
+│   └──────────┬──────────┘       └──────────┬───────────┘                         │
+└──────────────┼─────────────────────────────┼─────────────────────────────────────┘
+               │ Iterates page.Frames()      │ Injects Bundled Payload (`payload.min.js`)
+┌──────────────▼─────────────────────────────▼─────────────────────────────────────┐
+│                       BROWSER & IFRAME EXECUTION CONTEXTS                        │
+│                                                                                  │
+│   ┌──────────────────────────────────────────────────────────────────────────┐   │
+│   │                Injected Client Payload (`payload.min.js`)                │   │
+│   │  - Recursive Shadow DOM Traversal (el.shadowRoot)                        │   │
+│   │  - Scoped Exploration Sweep (--depth=N, aria-expanded, dynamic forms)    │   │
+│   │  - Zero-LLM Heuristic Labeling Engine (Explicit -> Sibling -> Spatial)   │   │
+│   │  - Scoped ARIA Locator & @medv/finder Fallback CSS Generation            │   │
+│   └────────────────────────────────────┬─────────────────────────────────────┘   │
+└────────────────────────────────────────┼─────────────────────────────────────────┘
+                                         │ Frame-Level Extracted JSON Arrays
+┌────────────────────────────────────────▼─────────────────────────────────────────┐
+│                          COMPILATION & EMITTER ENGINE                            │
+│                                                                                  │
+│   ┌──────────────────────────────────────────────────────────────────────────┐   │
+│   │              Tool Intermediate Representation (TIR) Compiler             │   │
+│   │   (Multi-Frame Merging, Scoped Locator Deduplication, Confidence Tagging) │   │
+│   └────────────────────────────────────┬─────────────────────────────────────┘   │
+│                                        │                                         │
+│         ┌──────────────────────────────┼──────────────────────────────┐          │
+│         ▼                              ▼                              ▼          │
+│  ┌──────────────┐               ┌──────────────┐               ┌──────────────┐  │
+│  │    WebMCP    │               │ Anthropic MCP│               │ Universal FC │  │
+│  │ Static Script│               │ (tools/list) │               │ (go-openai)  │  │
+│  └──────────────┘               └──────────────┘               └──────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────────┘
+
+---
+
+## 3. RECOMMENDED GO LIBRARIES & STACK ARCHITECTURE
+
+| Subsystem / Pipeline Phase | Target Library / Module | Architectural Justification |
+| :--- | :--- | :--- |
+| **Browser Orchestration** | `github.com/go-rod/rod` | High-performance CDP wrapper with native support for multi-frame traversal (`page.Frames()`) and DOM injection. |
+| **Stealth & Bot Evasion** | `github.com/go-rod/stealth` | Native fingerprint evasion parameters (`navigator.webdriver` overrides, spoofed user-agents/headers). |
+| **OpenAI Schema Model** | `github.com/sashabaranov/go-openai` | Provides native `FunctionDefinition` and `FunctionParameters` structures for OpenAI function calling emission. |
+| **JSON Schema Generation** | `github.com/invopop/jsonschema` | Reflection and struct tag-based strict JSON Schema draft-07 generation for tool input properties. |
+| **CLI App Framework** | `github.com/spf13/cobra` + `pflag` | POSIX-compliant CLI flags (`visor inspect <url>`), subcommands, auto-help docs. |
+| **Terminal UI & Styling** | `github.com/charmbracelet/lipgloss` | Styled terminal output, diagnostic progress indicators, confidence reporting, and DX formatting. |
+| **JS Client Asset Bundling** | `esbuild` (via `//go:generate`) | Bundles `@medv/finder` and client traversal logic into minified `payload.min.js` prior to `//go:embed`. |
+
+---
+
+## 4. COMPILATION & PIPELINE PHASES
+
+### Phase 0: Build-Time Payload Compilation (`go generate`)
+* `esbuild` bundles standard JS extraction utilities, recursive Shadow DOM queries, heuristic parsing, and `@medv/finder` into `./client/dist/payload.min.js`.
+* Embedded directly into the Go binary runtime via Go's native `//go:embed` filesystem directive.
+
+### Phase 1: Context Allocation & Multi-Frame Initialization
+* Go Orchestrator launches isolated headless browser instance using `go-rod/rod` wrapped with `stealth` evasion.
+* Navigates to target URL and pauses upon network idle (`Page.loadEventFired` + DOM stabilization check).
+* Captures top-level page context and discovers all active child frames (`page.Frames()`).
+
+### Phase 2: Scoped Active Exploration Pass
+* Inject `payload.min.js` into root document and all accessible child frame contexts.
+* Execute active dynamic activation sweep governed by `--depth=N` and `--exploration-budget` (default `500ms`).
+* **Target Scoping:** Sweep dynamic elements (`aria-expanded="false"`, `<details>`, custom `<select>` replacements, tab triggers) up to specified dynamic depth to trigger SPA state hydration without risking infinite state loops or accidental form submissions.
+
+### Phase 3: DOM Mining, Shadow DOM, & Zero-LLM Heuristics
+* Recursively query open Shadow DOM boundaries (`el.shadowRoot`) across all frames.
+* Extract forms, input controls (`input`, `select`, `textarea`), buttons, and action paths.
+* **4-Tier Heuristic Labeling Engine:**
+  1. *Explicit:* `<label>`, `aria-label`, `placeholder`, `title`.
+  2. *Sibling Scraping:* Immediate preceding/adjacent text nodes (< 50 chars).
+  3. *Spatial Parent Scraping:* Parent `<fieldset>`, `<form>`, `<legend>`, or nearest `<h1>`-`<h3>` context.
+  4. *Fallback:* Generic fallback locator with structural hint (`"Input field inside #checkout"`).
+* **Scoped Locator Generation:** Construct dual-locator strategies to avoid execution collisions in downstream agent runtimes:
+  1. Primary: Scoped ARIA locator (`ContainerLocator >> Primary ARIA Locator`).
+  2. Fallback: Concise CSS selector generated via `@medv/finder`.
+
+### Phase 4: Intermediate Representation (TIR) Compilation
+* Collect extraction JSON arrays from all frames in Go.
+* Deduplicate identical form definitions, merge frame hierarchies, assign `ExtractionConfidence` ratings, and validate `snake_case` tool names.
+
+### Phase 5: Multi-Format Emitter Processing
+* Pass `tir.ToolSet` through target static emitters specified via `--format` flag (`webmcp`, `mcp`, `openai`, `all`).
+
+---
+
+## 5. TOOL INTERMEDIATE REPRESENTATION (TIR) SPECIFICATION
+
+```go
+package tir
+
+type ParameterType string
+
+const (
+	TypeString  ParameterType = "string"
+	TypeNumber  ParameterType = "number"
+	TypeBoolean ParameterType = "boolean"
+	TypeSelect  ParameterType = "select"
+)
+
+type ExtractionConfidence string
+
+const (
+	ConfidenceExplicit  ExtractionConfidence = "explicit"  // Direct <label>, aria-label, placeholder
+	ConfidenceHeuristic ExtractionConfidence = "heuristic" // Inferred from DOM siblings/ancestor headers
+	ConfidenceFallback  ExtractionConfidence = "fallback"  // Structural fallback context
+)
+
+type ToolParameter struct {
+	Name            string               `json:"name"`
+	Type            ParameterType        `json:"type"`
+	Description     string               `json:"description"`
+	Confidence      ExtractionConfidence `json:"confidence"`
+	Required        bool                 `json:"required"`
+	Enum            []string             `json:"enum,omitempty"`
+	
+	// Locators
+	ScopedLocator   string               `json:"scoped_locator"` // e.g., "form#login >> role=textbox[name='Email']"
+	FallbackCSS     string               `json:"fallback_css"`   // CSS selector from @medv/finder
+}
+
+type ToolDefinition struct {
+	ID               string               `json:"id"`
+	Name             string               `json:"name"`             // e.g., "submit_search_form"
+	Description      string               `json:"description"`      // Extracted form summary or parent label
+	TargetURL        string               `json:"target_url"`
+	FrameURI         string               `json:"frame_uri,omitempty"` // Cross-origin iframe identifier
+	ContainerLocator string               `json:"container_locator"`   // Parent scoping selector (form/dialog/nav)
+	ActionType       string               `json:"action_type"`         // "submit", "click", "fill"
+	Parameters       []ToolParameter      `json:"parameters"`
+	ReadOnly         bool                 `json:"read_only"`
+}
+
+type ToolSet struct {
+	SourceURL string           `json:"source_url"`
+	Metadata  map[string]any   `json:"metadata"`
+	Tools     []ToolDefinition `json:"tools"`
+}
+```
+
+---
+
+## 6. EMITTER SPECIFICATIONS & TARGET FORMATS
+
+### Emitter 1: WebMCP Script (`document.modelContext`)
+* **Target:** Browser extensions and native browser agent contexts.
+* **Output:** Static JavaScript module emitting executable `document.modelContext.registerTool()` registration calls.
+
+### Emitter 2: Anthropic MCP Protocol (Static `tools/list` JSON)
+* **Target:** Claude Desktop, Cursor, and server-side MCP gateways.
+* **Output:** Standard MCP `tools/list` compliant JSON payload matching the Model Context Protocol schema specifications for static tool registration.
+
+### Emitter 3: Universal Function Calling (OpenAI / Vercel AI SDK)
+* **Target:** Direct LLM API integration (OpenAI, Anthropic native functions, Ollama, LangChain).
+* **Output:** JSON Array of standard OpenAI function definitions (`{"type": "function", "function": {...}}`).
+
+---
+
+## 7. PROJECT ROADMAP & IMPLEMENTATION MILESTONES
+
+### Milestone 1: JS Client Engine & Build Pipeline (Week 1)
+- [ ] Configure `client/` esbuild workspace with `@medv/finder` integration.
+- [ ] Implement recursive Shadow DOM query engine (`querySelectorAllDeep`).
+- [ ] Implement 4-tier non-LLM heuristic labeling engine.
+- [ ] Build Scoped ARIA Locator generator.
+- [ ] Setup `//go:generate` step to bundle minified script into `payload.min.js`.
+
+### Milestone 2: Go Core, Rod Multi-Frame & Stealth Engine (Week 2)
+- [ ] Initialize Cobra CLI framework (`visor inspect <url>`).
+- [ ] Implement `go-rod/rod` browser context with `stealth` evasion flags.
+- [ ] Add multi-frame evaluation loop (`page.Frames()`) for cross-origin iframe extraction.
+- [ ] Implement dynamic exploration pass with `--depth=N` and `--exploration-budget` time controls.
+- [ ] Add diagnostic anti-bot detection status parsing (`AccessBlockedError`).
+
+### Milestone 3: Emitter Pipeline Development (Weeks 3-4)
+- [ ] Build WebMCP JS emitter generator.
+- [ ] Build Anthropic MCP static JSON `tools/list` schema emitter.
+- [ ] Build Universal OpenAI Function Calling schema emitter.
+
+### Milestone 4: Diagnostic Formatting, DX & Launch (Week 5)
+- [ ] Implement `charmbracelet/lipgloss` diagnostic output (displaying confidence metrics, frame counts, unmapped asset warnings).
+- [ ] Add CLI flags: `--url`, `--format`, `--output`, `--timeout`, `--depth`, `--exploration-budget`.
+- [ ] Validate on complex SPA target suites (React, Vue, Web Components, iFrame checkout forms).
+- [ ] Author documentation, terminal demo GIF, and prepare Hacker News launch write-up ("Show HN").
+
+---
+
+## 8. DEFINITION OF DONE & SUCCESS METRICS
+
+1. Compilation Speed SLA: In-memory Go TIR compilation and static format emission must complete in `< 50ms` after receiving CDP payload. Total execution time governed strictly by network load and `--timeout` flags.
+2. Determinism: Identical DOM states across frames must produce 100% identical TIR and tool manifest structures across repeated executions.
+3. Zero Token Footprint: Engine must output fully populated, strongly typed tool specifications without issuing external LLM or vision API calls.
+4. Locator Resilience: 100% of generated locators must use scoped parent paths (`ContainerLocator >> ARIA Locator`) to prevent strictness violation collisions in agent runtimes.
+5. DOM Boundary Coverage: Successfully extract form and input controls nested inside open Shadow DOM structures and cross-origin standard `<iframe>` contexts.
+6. Standalone Portability: Binary compiles cleanly across macOS, Linux, and Windows with zero external runtime dependencies beyond an installed Chromium browser core.

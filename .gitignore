@@ -1,0 +1,25 @@
+# Go build and test output
+/geovisor
+/geovisor.exe
+*.test
+*.out
+*.prof
+*.trace
+/coverage/
+/dist/
+/generated/
+
+# Local environment and editor state
+.env
+.env.*
+.vscode/
+.idea/
+
+# Future TypeScript client output
+/node_modules/
+client/node_modules/
+client/dist/
+
+# Operating system files
+.DS_Store
+Thumbs.db

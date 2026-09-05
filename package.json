@@ -1,0 +1,22 @@
+{
+  "name": "geovisor-client",
+  "private": true,
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node client/scripts/build.mjs",
+    "verify:bundle": "node client/scripts/build.mjs --verify",
+    "test": "npm run build && node --test client/test/*.test.mjs",
+    "check": "npm run typecheck && npm test && npm run verify:bundle"
+  },
+  "dependencies": {
+    "@medv/finder": "4.0.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2"
+  }
+}

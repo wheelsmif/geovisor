@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://geo-suite.github.io/geovisor/schemas/emitter-bindings.schema.json",
+  "title": "GEO-Visor Browser Binding Companion",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "target", "tools"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "target": { "enum": ["mcp", "openai"] },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["toolId", "actions"],
+        "properties": {
+          "toolId": { "type": "string", "minLength": 1 },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["action", "sideEffect", "locatorCandidates"],
+              "properties": {
+                "action": { "enum": ["click", "fill", "select", "check"] },
+                "inputParameter": { "type": "string", "minLength": 1 },
+                "sideEffect": {
+                  "$ref": "tir.schema.json#/$defs/sideEffect"
+                },
+                "locatorCandidates": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "tir.schema.json#/$defs/locatorCandidate"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

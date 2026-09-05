@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Frame boundaries corpus</title></head>
+<body>
+  <button aria-label="Root action">Root</button>
+  <div id="shadow-host"></div>
+  <script>
+    const root = document.querySelector("#shadow-host").attachShadow({mode: "open"});
+    root.innerHTML = '<button aria-label="Shadow action">Shadow</button>';
+  </script>
+  <iframe name="same-origin" src="/nested-frame.html"></iframe>
+  <iframe name="cross-origin" src="{{CROSS_ORIGIN}}/cross-frame.html"></iframe>
+</body>
+</html>

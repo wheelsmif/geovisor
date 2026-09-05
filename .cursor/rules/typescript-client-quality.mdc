@@ -1,0 +1,18 @@
+---
+description: TypeScript quality standards for future GEO-Visor client code
+globs: "client/**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# TypeScript Client Quality
+
+- Enable strict TypeScript checks; do not use `any`.
+- Keep browser/protocol details out of shared TIR models.
+- Validate untrusted data at process and protocol boundaries.
+- Prefer discriminated unions and exhaustive `never` checks.
+- Use `unknown` in catch clauses and preserve error causes.
+- Pass cancellation signals through asynchronous operations.
+- Keep side effects explicit and isolate transport from pure transformations.
+- Preserve source ordering; do not add timestamps or random IDs to core TIR.
+- Add focused tests for serialization and boundary failures.
+- Add dependencies only for current, demonstrated needs.

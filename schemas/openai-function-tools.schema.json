@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://geo-suite.github.io/geovisor/schemas/openai-function-tools.schema.json",
+  "title": "OpenAI Responses API Function Tool Array",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["type", "name", "parameters", "strict"],
+    "properties": {
+      "type": { "const": "function" },
+      "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "description": { "type": "string" },
+      "parameters": { "$ref": "#/$defs/objectSchema" },
+      "strict": { "type": "boolean" }
+    }
+  },
+  "$defs": {
+    "objectSchema": {
+      "type": "object",
+      "required": ["type", "properties", "additionalProperties"],
+      "properties": {
+        "type": {
+          "oneOf": [
+            { "const": "object" },
+            { "const": ["object", "null"] }
+          ]
+        },
+        "description": { "type": "string" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/schema" }
+        },
+        "required": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "additionalProperties": { "const": false }
+      }
+    },
+    "schema": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "oneOf": [
+            {
+              "enum": [
+                "string",
+                "number",
+                "integer",
+                "boolean",
+                "object",
+                "array"
+              ]
+            },
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "enum": [
+                    "string",
+                    "number",
+                    "integer",
+                    "boolean",
+                    "object",
+                    "array"
+                  ]
+                },
+                { "const": "null" }
+              ],
+              "items": false
+            }
+          ]
+        },
+        "description": { "type": "string" },
+        "enum": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": ["string", "null"]
+          }
+        },
+        "items": { "$ref": "#/$defs/schema" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/schema" }
+        },
+        "required": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "additionalProperties": { "const": false }
+      }
+    }
+  }
+}

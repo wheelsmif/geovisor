@@ -1,0 +1,18 @@
+---
+description: Go quality standards for GEO-Visor
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go Quality
+
+- Target the Go version declared in `go.mod`.
+- Keep packages cohesive and dependencies minimal.
+- Accept interfaces at boundaries; return concrete types by default.
+- Wrap errors with context and expose typed errors when callers branch on them.
+- Pass `context.Context` first for future cancellable I/O.
+- Avoid package globals except immutable constants.
+- Keep canonical DTOs free of maps and nondeterministic metadata.
+- Initialize JSON slices through constructors or normalization.
+- Write table-driven tests when multiple contract cases share behavior.
+- Run `gofmt`, `go test ./...`, and `go vet ./...`.

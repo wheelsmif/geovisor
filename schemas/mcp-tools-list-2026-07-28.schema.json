@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://geo-suite.github.io/geovisor/schemas/mcp-tools-list-2026-07-28.schema.json",
+  "title": "MCP 2026-07-28 ListToolsResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tools"],
+  "properties": {
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "inputSchema", "annotations"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "inputSchema": {
+            "type": "object",
+            "required": ["type", "properties", "additionalProperties"],
+            "properties": {
+              "type": { "const": "object" },
+              "properties": { "type": "object" },
+              "required": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string" }
+              },
+              "additionalProperties": { "const": false }
+            }
+          },
+          "annotations": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "readOnlyHint",
+              "destructiveHint",
+              "idempotentHint",
+              "openWorldHint"
+            ],
+            "properties": {
+              "readOnlyHint": { "type": "boolean" },
+              "destructiveHint": { "type": "boolean" },
+              "idempotentHint": { "type": "boolean" },
+              "openWorldHint": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
