@@ -1,5 +1,4 @@
-# GEO-Visor
-
+![GEO-VISOR](./banner.svg)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/wheelsmif/geovisor/actions/workflows/ci.yml/badge.svg)](https://github.com/wheelsmif/geovisor/actions/workflows/ci.yml)
 
