@@ -1,31 +1,14 @@
 name: CI
 
+# Path filtering is applied per job rather than on the triggers. A workflow run
+# skipped by `paths-ignore` produces no check run at all, which leaves a
+# required check permanently pending and deadlocks docs-only pull requests. Jobs
+# skipped by `if` do produce a check run, reported as skipped, which satisfies
+# branch protection.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.svg"
-      - "**/*.png"
-      - "**/*.jpg"
-      - "**/*.jpeg"
-      - "**/*.gif"
-      - "**/*.webp"
-      - "docs/**"
-      - ".cursor/**"
-      - "LICENSE"
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.svg"
-      - "**/*.png"
-      - "**/*.jpg"
-      - "**/*.jpeg"
-      - "**/*.gif"
-      - "**/*.webp"
-      - "docs/**"
-      - ".cursor/**"
-      - "LICENSE"
 
 permissions:
   contents: read
@@ -33,10 +16,55 @@ permissions:
 env:
   GO_VERSION: "1.26.6"
   NODE_VERSION: "24.15.0"
+  STATICCHECK_VERSION: "v0.7.0"
 
 jobs:
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          # An unknown or absent base means we cannot prove the change is
+          # docs-only, so run everything.
+          if [ -z "$base" ] ||
+             [ "$base" = "0000000000000000000000000000000000000000" ] ||
+             ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only "$base" "${{ github.sha }}" > "$RUNNER_TEMP/changed.txt"
+          code=false
+          # Redirect from a file rather than a pipe so the loop runs in this
+          # shell and the assignment survives.
+          while IFS= read -r file; do
+            case "$file" in
+              docs/*|.cursor/*|LICENSE) continue ;;
+              *.md|*.svg|*.png|*.jpg|*.jpeg|*.gif|*.webp) continue ;;
+            esac
+            code=true
+            break
+          done < "$RUNNER_TEMP/changed.txt"
+          echo "Changed paths classified as code: $code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   quality:
     name: Quality (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -70,11 +98,40 @@ jobs:
             exit 1
           }
       - run: go vet ./...
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@${{ env.STATICCHECK_VERSION }} ./...
       - name: Test packages and artifact schemas
         run: go test ./...
 
+  browser:
+    name: Browser layer required
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    env:
+      GEOVISOR_REQUIRE_BROWSER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # The browser tests skip silently when no Chromium is found, so assert the
+      # runner actually has one before relying on GEOVISOR_REQUIRE_BROWSER.
+      - name: Report Chrome version
+        run: google-chrome --version
+      - name: Test browser-backed packages
+        run: go test ./internal/browser/... ./internal/cli/...
+
   race-security:
     name: Linux race and security
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,6 +153,8 @@ jobs:
 
   cross-build:
     name: Source cross-build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -103,6 +162,10 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      # scripts/check.sh gates on this locally, and CONTRIBUTING.md presents
+      # check.sh as the gate, so CI must enforce it too.
+      - name: Verify reproducible build and version stamping
+        run: sh ./scripts/verify-release.sh
       - run: sh ./scripts/build-release.sh v0.0.0-ci
       - name: Verify six archives and checksums
         run: |

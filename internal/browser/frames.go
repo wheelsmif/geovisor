@@ -250,38 +250,6 @@ func originForURL(raw string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
-func flattenFrameTree(
-	root *proto.PageFrameTree,
-	rootSession *sessionClient,
-	oopifSessions map[proto.PageFrameID]*sessionClient,
-) []discoveredFrame {
-	result := make([]discoveredFrame, 0)
-	var visit func(*proto.PageFrameTree, []observation.FrameReference, *sessionClient)
-	visit = func(node *proto.PageFrameTree, path []observation.FrameReference, inherited *sessionClient) {
-		if node == nil || node.Frame == nil {
-			return
-		}
-		session := inherited
-		if oopif := oopifSessions[node.Frame.ID]; oopif != nil {
-			session = oopif
-		}
-		result = append(result, discoveredFrame{
-			frame: node.Frame, path: cloneFramePath(path), session: session,
-		})
-		for index, child := range node.ChildFrames {
-			if child == nil || child.Frame == nil {
-				continue
-			}
-			childPath := append(cloneFramePath(path), observation.FrameReference{
-				Index: index, Name: child.Frame.Name, Src: child.Frame.URL,
-			})
-			visit(child, childPath, session)
-		}
-	}
-	visit(root, []observation.FrameReference{}, rootSession)
-	return result
-}
-
 func flattenCompleteFrameTree(
 	root *proto.PageFrameTree,
 	rootSession *sessionClient,

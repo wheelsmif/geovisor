@@ -814,17 +814,6 @@ func locatorSlug(locator tir.LocatorCandidate) string {
 	return "css"
 }
 
-func semanticLocatorKey(locator *tir.SemanticLocator) string {
-	if locator == nil {
-		return ""
-	}
-	parts := []string{locator.Role, locator.Name}
-	for _, scope := range locator.Scope {
-		parts = append(parts, scope.Role, scope.Name)
-	}
-	return joinedKey(parts...)
-}
-
 func semanticNodesKey(nodes []observation.SemanticNode) string {
 	parts := make([]string, 0, len(nodes)*2)
 	for _, node := range nodes {

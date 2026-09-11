@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-rod/rod/lib/launcher/flags"
 	"github.com/go-rod/rod/lib/proto"
-	"github.com/wheelsmif/geovisor/internal/observation"
 )
 
 func TestOwnedLauncherDisablesLeaklessAndPreservesIsolation(t *testing.T) {
@@ -136,44 +135,6 @@ func TestSanitizedErrorRedactsEndpointSecrets(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "redacted") {
 		t.Fatalf("sanitized error has no redaction marker: %s", rendered)
-	}
-}
-
-func TestFlattenFrameTreePreservesTreeOrder(t *testing.T) {
-	t.Parallel()
-	session := &sessionClient{}
-	tree := &proto.PageFrameTree{
-		Frame: &proto.PageFrame{ID: "root", URL: "https://root.test/"},
-		ChildFrames: []*proto.PageFrameTree{
-			{
-				Frame: &proto.PageFrame{ID: "a", Name: "first", URL: "https://a.test/"},
-				ChildFrames: []*proto.PageFrameTree{
-					{Frame: &proto.PageFrame{ID: "aa", Name: "nested", URL: "https://aa.test/"}},
-				},
-			},
-			{Frame: &proto.PageFrame{ID: "b", Name: "second", URL: "https://b.test/"}},
-		},
-	}
-	frames := flattenFrameTree(tree, session, nil)
-	if len(frames) != 4 {
-		t.Fatalf("frame count = %d, want 4", len(frames))
-	}
-	got := []string{
-		string(frames[0].frame.ID),
-		string(frames[1].frame.ID),
-		string(frames[2].frame.ID),
-		string(frames[3].frame.ID),
-	}
-	want := []string{"root", "a", "aa", "b"}
-	for index := range want {
-		if got[index] != want[index] {
-			t.Fatalf("frame order = %v, want %v", got, want)
-		}
-	}
-	if len(frames[2].path) != 2 ||
-		frames[2].path[0] != (observation.FrameReference{Index: 0, Name: "first", Src: "https://a.test/"}) ||
-		frames[2].path[1].Index != 0 {
-		t.Fatalf("nested frame path = %+v", frames[2].path)
 	}
 }
 
