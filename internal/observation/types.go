@@ -128,11 +128,17 @@ type SemanticLocator struct {
 	Scope []SemanticNode `json:"scope"`
 	Role  string         `json:"role"`
 	Name  string         `json:"name,omitempty"`
+	Nth   int            `json:"nth,omitempty"`
 }
 
 type SemanticNode struct {
 	Role string `json:"role"`
 	Name string `json:"name,omitempty"`
+	// Nth selects among elements with the same role and name, in document
+	// order, and is zero when the match is unique. Disambiguating by ordinal
+	// rather than by mutating Name is what keeps Name a value the consumer can
+	// recompute from the page (GV-004).
+	Nth int `json:"nth,omitempty"`
 }
 
 type ActionKind string

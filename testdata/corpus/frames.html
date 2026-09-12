@@ -1,14 +1,25 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Frame boundaries corpus</title></head>
-<body>
-  <button aria-label="Root action">Root</button>
-  <div id="shadow-host"></div>
-  <script>
-    const root = document.querySelector("#shadow-host").attachShadow({mode: "open"});
-    root.innerHTML = '<button aria-label="Shadow action">Shadow</button>';
-  </script>
-  <iframe name="same-origin" src="/nested-frame.html"></iframe>
-  <iframe name="cross-origin" src="{{CROSS_ORIGIN}}/cross-frame.html"></iframe>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>GEO-Visor frame locator corpus</title>
+  </head>
+  <body>
+    <!--
+      Two single-frame wrappers are the GV-003 case: a selector that counts
+      among element siblings gives both frames the same position, so frame 0
+      matches two elements and frame 1 matches none. Addressing a frame by its
+      index among the document's frames distinguishes them.
+
+      The frames are deliberately identical apart from their content: same tag,
+      no name, nothing for an accessible-name comparison to latch onto. Only
+      position tells them apart.
+    -->
+    <div class="wrapper">
+      <iframe srcdoc="<input aria-label='Query'>"></iframe>
+    </div>
+    <div class="wrapper">
+      <iframe srcdoc="<input aria-label='Query'>"></iframe>
+    </div>
+  </body>
 </html>

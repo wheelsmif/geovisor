@@ -5,9 +5,8 @@ Plan of record for the 48 findings in
 during remediation. Finding IDs are stable and are never renumbered; this
 document tracks each `GV-NNN` to a phase, a task, and an exit condition.
 
-Status: **Phase 1 complete. Phase 2.1 complete**, which also closed GV-001,
-GV-005, GV-035, and GV-049. Every finding was re-confirmed against the working
-tree before this plan was written.
+Status: **Phases 1 and 2 complete.** Every finding was re-confirmed against the
+working tree before this plan was written.
 
 ## Findings added during remediation
 
@@ -354,6 +353,13 @@ single source of output noise.
 and `aria-hidden="true"` ancestors are excluded. A fixture covering all four
 ancestor cases plus one visible control asserts exactly one emitted interaction.
 
+**Done.** `traverse` is a pre-order DFS that carries inherited hiding across
+elements and open shadow roots. Only subtree-hiding conditions propagate
+(`display: none`, the `hidden` attribute, `aria-hidden="true"`);
+`visibility: hidden` is checked locally so a descendant may still opt back in
+with `visibility: visible`. Both cases have extractor tests. Hidden records are
+skipped before any interaction is built, so they never become tools.
+
 ### 2.4 GV-003 — Correct frame locators (S1), with GV-037
 
 Both halves are wrong. The CSS half emits
@@ -381,6 +387,21 @@ the deleted dead function had one. Backfill the live functions.
 **Acceptance:** A nested, multi-parent iframe fixture resolves each frame to the
 correct element when the emitted module executes.
 
+**Done.** Frames are addressed by `nth` among the containing document's frames
+and carry no name and no CSS fallback. `frameTraversalNodes` writes that shape;
+`resolveFrameNode` / `frameCandidates` consume it. The two walks — Go
+`collectFrameOwnerOrder` and TypeScript `frameCandidates` — are the same
+contract: pre-order, light children before shadow content, no descent past a
+frame. `TestWebMCPRuntimeResolvesFramePathsToTheCorrectFrame` executes the
+emitted module against two identical unnamed frames in separate wrappers.
+
+GV-037 is closed by `internal/browser/frames_test.go`: `frameTraversalNodes`,
+`augmentBatch` (including slice independence), `flattenCompleteFrameTree`
+(owner-order fallback and unattached OOPIFs), `collectFrameOwnerOrder` (the
+session-free half of `mergeFrameOwnerOrder`), `addUnattachedOOPIF`, and
+`originForURL`. `attachOOPIFSessions` remains CDP-bound and is exercised by the
+browser job, not by a unit test that would have to fake a browser.
+
 ### 2.5 GV-004 — Separate display name from match key (S1)
 
 `disambiguateInteractions` writes the disambiguated *display* name
@@ -398,6 +419,15 @@ within the match set) rather than a mutated name.
 *different*, correct elements when the emitted module executes, and tool
 identities remain distinct and stable.
 
+**Done.** `disambiguateInteractions` now mutates only the display name.
+`verifiedSemantic` records the element's index in the match set as `nth` when
+the match is not unique, and omits the semantic half entirely when the shared
+matcher cannot resolve back to the element. TIR, the observation DTO, the
+schema, and compiler identity all carry `nth`.
+`TestWebMCPRuntimeResolvesIdenticalNamesToDistinctElements` asserts the three
+"Query" tools in `forms.html` resolve to three different elements with CSS
+fallbacks stripped.
+
 ### 2.6 GV-005 — `contenteditable="false"` is not editable (S2)
 
 Both `isNativeControl` and `semanticRole` use `hasAttribute("contenteditable")`,
@@ -407,8 +437,9 @@ which is true for the literal string `"false"`.
 `contenteditable`, `contenteditable=""`, and `contenteditable="true"` still do.
 
 **Done in 2.1**, since both call sites now route through one shared predicate.
-The dedicated fixture asserting each attribute value is still owed and is
-tracked in Section 6.3.
+The dedicated fixture is in `client/test/extractor.test.mjs` and asserts
+`contenteditable="false"` is skipped while the empty, bare, `true`, and
+`plaintext-only` values still produce controls.
 
 ### 2.7 GV-007 — Stop emitting form controls twice (S2)
 
@@ -420,6 +451,15 @@ the rationale in `docs/compiler.md`.
 Note that `extract` currently also lacks an `else` between the form branch and
 the control branch, so a `<form>` that is itself a control-like element can
 produce two interactions from one record; the same change covers it.
+
+**Done.** Forms claim their controls first; claimed elements are skipped in the
+main loop, and the form / control / action branches are exclusive. Ownership
+follows `element.form` / the `form` attribute, not containment. Submit buttons
+are not claimed — they stay standalone actions.
+`TestWebMCPRuntimeDoesNotRegisterStandaloneFormControls` asserts the
+`forms.html` profile fields are not registered as their own tools, that
+`save-profile` still is, and that the three unowned Query inputs still are.
+Recorded in `docs/compiler.md` under "One tool per capability".
 
 ### 2.8 GV-035 — Stop rescanning the DOM per semantic node (S3)
 
@@ -456,12 +496,35 @@ A related naming weakness the harness exposed is still open: the
 from an unrelated preceding `<dialog>`. Scope names sourced from adjacent text
 are low-confidence and worth reconsidering alongside GV-018.
 
-**Phase exit:** GV-001 through GV-005, GV-007, GV-035, GV-037, GV-049 closed,
-and every `knownFailure` call in `internal/integration/webmcp_roundtrip_test.go`
-deleted. The GV-036 harness passes on every corpus fixture.
+**Phase exit — met.** GV-001 through GV-005, GV-007, GV-035, GV-037, and GV-049
+are closed. Every `knownFailure` call is gone, and so is the helper: with no
+callers left, staticcheck flagged it as dead code, which is the outcome the
+phase was aiming for. The GV-036 harness passes on every corpus fixture.
 
-Remaining in Phase 2 after 2.1: GV-002, GV-003 (with GV-037), GV-004, GV-007.
-One `knownFailure` call is left, naming GV-004.
+One principle emerged across 2.3, 2.4, and 2.5, and is worth keeping: **the
+extractor records only locators it has already resolved.** `verifiedSemantic`
+runs the shared matcher from 2.1 and omits the semantic half when it does not
+resolve back to the element it describes. GV-003, GV-004, and GV-049 were all
+the same failure wearing different clothes — a locator recorded without ever
+being tried, which then degraded silently to a CSS fallback. Producer-side
+verification makes that class of defect unrepresentable rather than merely
+tested for. It is also why the ordinal mechanism added for GV-004 could be
+reused unchanged for GV-003.
+
+Costs accepted, recorded so they are not rediscovered as surprises:
+
+- **Tool ID churn.** Scope identity now includes the match ordinal, so
+  `compiler.golden.json` IDs changed once. Correct, since two scopes sharing a
+  role and name but selecting different elements are different scopes. GV-018
+  owns the broader ID-stability design.
+- **Frame path nodes carry no CSS fallback.** No CSS selector expresses "the Nth
+  frame of this document". A frame that cannot be addressed by ordinal now fails
+  loudly instead of resolving to the wrong frame.
+- **Shadow-hosted frames.** `frameCandidates` in `shared/locate.ts` mirrors
+  `mergeFrameOwnerOrder`: pre-order, light children before shadow content, no
+  descent past a frame. The two orderings are stated in comments that name each
+  other, but nothing yet *tests* that they agree for a frame inside a shadow
+  root, because neither jsdom nor the corpus exercises it. Noted under 6.3.
 
 ---
 
@@ -762,6 +825,10 @@ Low blast radius, done last, but not skipped.
   per code suits the go-quality rule.
 - **GV-043 (S4)** — Unchecked type assertions in three test files panic instead
   of failing, obscuring which assertion broke.
+- Shadow-hosted frames: `frameCandidates` and `collectFrameOwnerOrder` state
+  the same walk in comments that name each other, and each side has its own
+  test, but nothing yet runs them against one DOM that hosts a frame in a
+  shadow root. Neither jsdom nor the corpus exercises that case.
 
 ### 6.4 Documentation
 

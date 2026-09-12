@@ -54,6 +54,10 @@ export function semanticRole(element: Element): string {
   if (tag === "dialog") return "dialog";
   if (tag === "details" || tag === "fieldset") return "group";
   if (/^h[1-6]$/u.test(tag)) return "heading";
+  // HTML-AAM gives <iframe> no corresponding ARIA role, but a frame path node
+  // has to name what it addresses, and a role checked against this table is
+  // better than a role that is merely asserted. See FRAME_ROLE in locate.ts.
+  if (tag === "iframe" || tag === "frame") return "iframe";
   return "";
 }
 

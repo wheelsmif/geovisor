@@ -167,11 +167,16 @@ type SemanticLocator struct {
 	Scope []SemanticNode `json:"scope"`
 	Role  string         `json:"role"`
 	Name  string         `json:"name,omitempty"`
+	Nth   int            `json:"nth,omitempty"`
 }
 
 type SemanticNode struct {
 	Role string `json:"role"`
 	Name string `json:"name,omitempty"`
+	// Nth selects among elements with the same role and name, in document
+	// order, and is zero when the match is unique. It is deterministic: the
+	// index is derived from document order, never from collection order.
+	Nth int `json:"nth,omitempty"`
 }
 
 type ActionBinding struct {

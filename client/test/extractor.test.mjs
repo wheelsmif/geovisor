@@ -201,6 +201,106 @@ test("classifies submission only for controls associated with a form", async () 
   assert.equal(submit.actions[0].sideEffect.class, "submission");
 });
 
+// GV-002. Hiding is inherited, but only `visibility` is an inherited CSS
+// property: a descendant of a `display: none` wrapper still reports its own
+// `display`, so an element-local check cannot see it.
+test("excludes controls hidden by an ancestor, not just by themselves", async () => {
+  const dom = page(`
+    <div style="display:none"><input aria-label="Under display none"></div>
+    <div style="visibility:hidden"><input aria-label="Under visibility hidden"></div>
+    <div hidden><input aria-label="Under hidden attribute"></div>
+    <div aria-hidden="true"><input aria-label="Under aria-hidden"></div>
+    <input aria-label="Visible">
+  `);
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    ["Visible"],
+  );
+});
+
+// A descendant may opt back in to visibility, which is why `visibility` must
+// not be treated as hiding the whole subtree.
+test("honors a visibility:visible override inside a hidden ancestor", async () => {
+  const dom = page(`
+    <div style="visibility:hidden">
+      <input aria-label="Still hidden">
+      <input aria-label="Opted back in" style="visibility:visible">
+    </div>
+  `);
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    ["Opted back in"],
+  );
+});
+
+// GV-007. A control owned by a form is a parameter of the form's tool, so
+// emitting it standalone as well would give an agent two ways to fill one field
+// and no basis for choosing. Submit buttons stay standalone: they are actions
+// rather than parameters, and the form tool requires every required parameter.
+test("emits form-owned controls only as form parameters", async () => {
+  const dom = page(`
+    <form aria-label="Profile">
+      <input aria-label="Display name">
+      <button type="submit">Save</button>
+    </form>
+    <input aria-label="Unowned">
+  `);
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.deepEqual(
+    Array.from(interactions(batch, "form"), (item) => item.name),
+    ["Profile"],
+  );
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    ["Unowned"],
+  );
+  assert.deepEqual(
+    Array.from(interactions(batch, "action"), (item) => item.name),
+    ["Save"],
+  );
+});
+
+// A control associated with a form by the `form` attribute rather than by
+// containment is owned just as much, and is claimed the same way.
+test("claims controls associated with a form by attribute", async () => {
+  const dom = page(`
+    <form id="checkout" aria-label="Checkout"></form>
+    <input aria-label="Coupon" form="checkout">
+  `);
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.deepEqual(
+    Array.from(interactions(batch, "form")[0].parameters, (parameter) => parameter.name),
+    ["coupon"],
+  );
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    [],
+  );
+});
+
+// GV-005. `hasAttribute("contenteditable")` is true for the string "false".
+test("treats contenteditable as editable only when its value says so", async () => {
+  const dom = page(`
+    <div contenteditable="false" aria-label="Not editable"></div>
+    <div contenteditable aria-label="Bare"></div>
+    <div contenteditable="" aria-label="Empty"></div>
+    <div contenteditable="true" aria-label="True"></div>
+    <div contenteditable="plaintext-only" aria-label="Plaintext"></div>
+  `);
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    ["Bare", "Empty", "True", "Plaintext"],
+  );
+});
+
 test("repeated extraction is deterministic", async () => {
   const dom = page(`
     <form aria-label="Search">

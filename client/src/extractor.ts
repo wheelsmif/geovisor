@@ -9,6 +9,7 @@ import type {
   Locator,
   Parameter,
   PathNode,
+  SemanticLocator,
   SemanticNode,
   SideEffect,
   ValueType,
@@ -16,6 +17,7 @@ import type {
 import { cleanText, DESCRIPTION_LIMIT, humanize } from "./shared/text";
 import { explicitRole, inputType, parentAcrossShadow, read, referencedText } from "./shared/dom";
 import { GENERIC_ROLE, isContentEditable, semanticRole } from "./shared/role";
+import { semanticMatches } from "./shared/locate";
 import { accessibleName, type NameSource } from "./shared/name";
 import { optionLabels } from "./shared/option";
 
@@ -61,6 +63,8 @@ interface ElementRecord {
   element: Element;
   shadowPath: PathNode[];
   sourceOrder: number;
+  /** Resolved by `traverse`, which is the only place ancestors are known. */
+  hidden: boolean;
 }
 
 interface LabelResult {
@@ -99,17 +103,35 @@ function normalizeOptions(options: ExtractionOptions | undefined): NormalizedOpt
   };
 }
 
-function isHidden(element: Element): boolean {
-  if (element.localName === "input" && inputType(element as HTMLInputElement) === "hidden") {
-    return true;
-  }
+/**
+ * Reports whether an element hides everything inside it, not just itself.
+ *
+ * `display: none` is the reason GV-002 needed an ancestor walk at all: it is not
+ * reflected in a descendant's computed style, because only the *used* value is
+ * affected, so a descendant of a `display: none` wrapper still reports its own
+ * `display`. The `hidden` attribute resolves to `display: none` through the UA
+ * stylesheet, and `aria-hidden="true"` hides the whole subtree from the
+ * accessibility tree, with `aria-hidden="false"` on a descendant not undoing it.
+ */
+function hidesSubtree(element: Element): boolean {
   if (element.hasAttribute("hidden") || element.getAttribute("aria-hidden") === "true") {
     return true;
   }
-  return read(false, () => {
-    const style = getComputedStyle(element);
-    return style.display === "none" || style.visibility === "hidden";
-  });
+  return read(false, () => getComputedStyle(element).display === "none");
+}
+
+/**
+ * Reports whether an element is hidden by its own attributes or style.
+ *
+ * Ancestor-inherited hiding is *not* handled here; `traverse` carries that down
+ * the tree. `visibility` is deliberately checked locally: unlike `display`, it
+ * is an inherited CSS property, so the computed value already accounts for
+ * ancestors and still honors a descendant's `visibility: visible` override.
+ */
+function isHiddenLocally(element: Element): boolean {
+  if (element.localName === "input" && inputType(element) === "hidden") return true;
+  if (hidesSubtree(element)) return true;
+  return read(false, () => getComputedStyle(element).visibility === "hidden");
 }
 
 /**
@@ -175,25 +197,45 @@ function pathNode(element: Element, sourceOrder: number): PathNode {
   return node;
 }
 
+/**
+ * Walks the document in source order, recording each element with whether it is
+ * hidden.
+ *
+ * This is a depth-first child walk rather than a flat `querySelectorAll("*")`
+ * scan so that hiding can be inherited from ancestors (GV-002) and across
+ * shadow boundaries: a hidden host hides its shadow tree. Pre-order DFS visits
+ * elements in the same order the flat scan did, so `sourceOrder` -- and every
+ * tool ID derived from it -- is unchanged.
+ */
 function traverse(root: Document | ShadowRoot): ElementRecord[] {
   const records: ElementRecord[] = [];
   let sourceOrder = 0;
 
-  const visit = (currentRoot: Document | ShadowRoot, shadowPath: PathNode[]): void => {
-    for (const element of Array.from(currentRoot.querySelectorAll("*"))) {
-      records.push({ element, shadowPath, sourceOrder: sourceOrder++ });
+  const visit = (
+    parent: Document | ShadowRoot | Element,
+    shadowPath: PathNode[],
+    inheritedHidden: boolean,
+  ): void => {
+    for (const element of Array.from(parent.children)) {
+      const hidden = inheritedHidden || read(true, () => isHiddenLocally(element));
+      records.push({ element, shadowPath, sourceOrder: sourceOrder++, hidden });
+      // Only subtree-hiding conditions propagate. `visibility: hidden` does not,
+      // because a descendant may set `visibility: visible`.
+      const subtreeHidden = inheritedHidden || read(true, () => hidesSubtree(element));
+
       const shadowRoot = read<ShadowRoot | null>(null, () => element.shadowRoot);
       if (shadowRoot?.mode === "open") {
         const hostPath = read<PathNode>(
           { css: read(element.localName, () => simpleSelector(element)) },
           () => pathNode(element, sourceOrder),
         );
-        visit(shadowRoot, [...shadowPath, hostPath]);
+        visit(shadowRoot, [...shadowPath, hostPath], subtreeHidden);
       }
+      visit(element, shadowPath, subtreeHidden);
     }
   };
 
-  visit(root, []);
+  visit(root, [], false);
   return records;
 }
 
@@ -214,19 +256,56 @@ function semanticScope(element: Element): SemanticNode[] {
 }
 
 function locatorFor(record: ElementRecord, role: string, name: string): Locator {
+  const semantic = verifiedSemantic(record.element, role, name);
+  const dom: Evidence = {
+    kind: "dom",
+    reference: `css:${record.element.localName}`,
+    score: 0.65,
+  };
   return {
     framePath: [],
     shadowPath: record.shadowPath.map((node) => ({
       ...(node.semantic ? { semantic: { ...node.semantic } } : {}),
       ...(node.css ? { css: node.css } : {}),
     })),
-    semantic: { scope: semanticScope(record.element), role, name },
+    ...(semantic ? { semantic } : {}),
     css: cssFallback(record.element),
-    evidence: [
-      { kind: "accessibility", reference: `semantic:${role}`, score: 0.88 },
-      { kind: "dom", reference: `css:${record.element.localName}`, score: 0.65 },
-    ],
+    evidence: semantic
+      ? [{ kind: "accessibility", reference: `semantic:${role}`, score: 0.88 }, dom]
+      : [dom],
   };
+}
+
+/**
+ * Builds a semantic locator, but only one that resolves back to `element`.
+ *
+ * The check runs the shared matcher the runtime will run. Recording an
+ * unverified locator is how GV-003, GV-004, and GV-049 all failed: the
+ * semantic strategy silently missed, the runtime fell through to the CSS
+ * fallback, and nothing reported that the precise strategy was dead. An
+ * unverifiable locator now records no semantic half at all, which is honest and
+ * leaves the CSS fallback as the only claim.
+ *
+ * When more than one element matches, the element's index within the match set
+ * is recorded. That is the replacement for mutating the name into something
+ * unique -- a mutated name matches nothing (GV-004).
+ */
+function verifiedSemantic(
+  element: Element,
+  role: string,
+  name: string,
+): SemanticLocator | undefined {
+  const root = read<Document | ShadowRoot | null>(null, () => {
+    const node = element.getRootNode();
+    return node instanceof Document || node instanceof ShadowRoot ? node : null;
+  });
+  if (!root) return undefined;
+
+  const semantic: SemanticLocator = { scope: semanticScope(element), role, name };
+  const matches = read<Element[]>([], () => semanticMatches(root, semantic));
+  const nth = matches.indexOf(element);
+  if (nth < 0) return undefined;
+  return matches.length > 1 ? { ...semantic, nth } : semantic;
 }
 
 function evidenceFor(label: LabelResult, element: Element): Evidence[] {
@@ -449,16 +528,20 @@ function associatedForm(element: Element): HTMLFormElement | null {
   return element.closest("form");
 }
 
-function formInteraction(formRecord: ElementRecord, records: ElementRecord[]): Interaction {
-  const form = formRecord.element as HTMLFormElement;
-  const role = explicitRole(form) || (form.getAttribute("role") === "search" ? "search" : "form");
-  const label = labelFor(form, role, formRecord.sourceOrder);
-  const members = records.filter(
+/** The visible controls and actions a form owns, in source order. */
+function formMembers(form: HTMLFormElement, records: ElementRecord[]): ElementRecord[] {
+  return records.filter(
     (record) =>
-      !isHidden(record.element) &&
+      !record.hidden &&
       (isControl(record.element) || isAction(record.element)) &&
       associatedForm(record.element) === form,
   );
+}
+
+function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): Interaction {
+  const form = formRecord.element as HTMLFormElement;
+  const role = explicitRole(form) || (form.getAttribute("role") === "search" ? "search" : "form");
+  const label = labelFor(form, role, formRecord.sourceOrder);
   const controls = members.filter((record) => isControl(record.element));
   const names = new Map<string, number>();
   const parameters: Parameter[] = [];
@@ -580,10 +663,11 @@ function disambiguateInteractions(interactions: Interaction[]): void {
     const occurrence = (occurrences.get(key) ?? 0) + 1;
     occurrences.set(key, occurrence);
     if (occurrence > 1) {
+      // Only the display name is disambiguated. The locator keeps the name the
+      // element actually carries, because that is the only name the runtime can
+      // recompute; ambiguity is resolved by the ordinal in the semantic locator
+      // instead (GV-004).
       interaction.name = `${interaction.name} (${occurrence})`;
-      for (const locator of interaction.locators) {
-        if (locator.semantic) locator.semantic.name = interaction.name;
-      }
       interaction.evidence.push({
         kind: "heuristic",
         reference: "identity:duplicate-name-disambiguated",
@@ -599,20 +683,40 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
   const exploration = await exploreSafely(records, normalized);
   if (exploration.details.size > 0) records = traverse(document);
 
+  // Forms claim their controls first (GV-007). A control owned by a form is a
+  // parameter of that form's tool and is not also emitted as a standalone tool:
+  // two tools that fill the same field give an agent no basis for choosing
+  // between them. Submit buttons are deliberately not claimed -- they are
+  // actions rather than parameters, and the form tool requires every required
+  // parameter, so dropping them would remove the ability to just click submit.
+  const formMemberIndex = new Map<HTMLFormElement, ElementRecord[]>();
+  const claimed = new Set<Element>();
+  for (const record of records) {
+    if (record.hidden || !(record.element instanceof HTMLFormElement)) continue;
+    const members = read<ElementRecord[]>([], () => formMembers(record.element as HTMLFormElement, records));
+    formMemberIndex.set(record.element, members);
+    for (const member of members) {
+      if (isControl(member.element)) claimed.add(member.element);
+    }
+  }
+
   const interactions: Interaction[] = [];
   for (const record of records) {
-    if (isHidden(record.element)) continue;
+    if (record.hidden) continue;
+    const element = record.element;
     try {
-      if (record.element instanceof HTMLFormElement) {
-        interactions.push(formInteraction(record, records));
-      }
-      if (isControl(record.element)) {
+      // The branches are exclusive: one record must not yield two interactions.
+      if (element instanceof HTMLFormElement) {
+        interactions.push(formInteraction(record, formMemberIndex.get(element) ?? []));
+      } else if (claimed.has(element)) {
+        // Already a parameter of its form's tool.
+      } else if (isControl(element)) {
         const interaction = controlInteraction(record);
-        explorationEvidence(interaction, record.element, exploration);
+        explorationEvidence(interaction, element, exploration);
         interactions.push(interaction);
-      } else if (isAction(record.element)) {
+      } else if (isAction(element)) {
         const interaction = actionInteraction(record);
-        explorationEvidence(interaction, record.element, exploration);
+        explorationEvidence(interaction, element, exploration);
         interactions.push(interaction);
       }
     } catch {

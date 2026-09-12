@@ -667,6 +667,7 @@ func compileLocator(field string, source observation.Locator) (tir.LocatorCandid
 		result.Semantic = &tir.SemanticLocator{
 			Scope: compileSemanticNodes(source.Semantic.Scope),
 			Role:  canonicalText(source.Semantic.Role), Name: cleanText(source.Semantic.Name),
+			Nth: normalizeNth(source.Semantic.Nth),
 		}
 	}
 	evidence := make([]observation.Evidence, 0, len(source.Evidence))
@@ -689,6 +690,7 @@ func compilePathNodes(source []observation.PathNode) []tir.PathNode {
 		if node.Semantic != nil {
 			result[i].Semantic = &tir.SemanticNode{
 				Role: canonicalText(node.Semantic.Role), Name: cleanText(node.Semantic.Name),
+				Nth: normalizeNth(node.Semantic.Nth),
 			}
 		}
 	}
@@ -698,7 +700,11 @@ func compilePathNodes(source []observation.PathNode) []tir.PathNode {
 func compileSemanticNodes(source []observation.SemanticNode) []tir.SemanticNode {
 	result := make([]tir.SemanticNode, len(source))
 	for i, node := range source {
-		result[i] = tir.SemanticNode{Role: canonicalText(node.Role), Name: cleanText(node.Name)}
+		result[i] = tir.SemanticNode{
+			Role: canonicalText(node.Role),
+			Name: cleanText(node.Name),
+			Nth:  normalizeNth(node.Nth),
+		}
 	}
 	return result
 }
@@ -706,9 +712,23 @@ func compileSemanticNodes(source []observation.SemanticNode) []tir.SemanticNode 
 func normalizeSemanticNodes(source []observation.SemanticNode) []observation.SemanticNode {
 	result := make([]observation.SemanticNode, len(source))
 	for i, node := range source {
-		result[i] = observation.SemanticNode{Role: canonicalText(node.Role), Name: cleanText(node.Name)}
+		result[i] = observation.SemanticNode{
+			Role: canonicalText(node.Role),
+			Name: cleanText(node.Name),
+			Nth:  normalizeNth(node.Nth),
+		}
 	}
 	return result
+}
+
+// normalizeNth clamps a match ordinal to a meaningful value. A negative index
+// addresses nothing, so it is treated as "the first match" rather than carried
+// into TIR where it would emit a locator no consumer can resolve.
+func normalizeNth(nth int) int {
+	if nth < 0 {
+		return 0
+	}
+	return nth
 }
 
 func aggregateEvidence(evidence map[string]observation.Evidence) (float64, []tir.Provenance) {
@@ -815,9 +835,12 @@ func locatorSlug(locator tir.LocatorCandidate) string {
 }
 
 func semanticNodesKey(nodes []observation.SemanticNode) string {
-	parts := make([]string, 0, len(nodes)*2)
+	// The ordinal participates in identity: two scopes that share a role and a
+	// name but select different elements are different scopes, and merging their
+	// tools would merge controls from distinct parts of a page.
+	parts := make([]string, 0, len(nodes)*3)
 	for _, node := range nodes {
-		parts = append(parts, node.Role, canonicalText(node.Name))
+		parts = append(parts, node.Role, canonicalText(node.Name), strconv.Itoa(node.Nth))
 	}
 	return joinedKey(parts...)
 }

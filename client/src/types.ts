@@ -27,6 +27,8 @@ export interface Frame {
 export interface SemanticNode {
   role: string;
   name?: string;
+  /** Index among the elements this node matches; 0 when absent. See GV-004. */
+  nth?: number;
 }
 
 export interface ParameterShape {
@@ -60,10 +62,8 @@ export interface PathNode {
   css?: string;
 }
 
-export interface SemanticLocator {
+export interface SemanticLocator extends SemanticNode {
   scope: SemanticNode[];
-  role: string;
-  name?: string;
 }
 
 export interface Evidence {

@@ -8,11 +8,26 @@ explicit `SourceOrder` is present; otherwise names provide canonical order.
 
 Interaction identity consists of interaction kind, frame path, semantic scope,
 role, and normalized accessible name. Locator content is also included when a
-name must be inferred. This deduplicates repeated observations without merging
-equivalent-looking controls in different frames or semantic scopes. IDs use an
-ASCII semantic slug plus the first 48 bits of SHA-256 over length-delimited
-canonical identity. If those complete IDs collide, identities are sorted and
-receive deterministic numeric suffixes.
+name must be inferred. Scope identity includes each node's match ordinal, so
+two scopes that share a role and a name but select different elements are
+distinct and their tools are not merged. This deduplicates repeated observations
+without merging equivalent-looking controls in different frames or semantic
+scopes. IDs use an ASCII semantic slug plus the first 48 bits of SHA-256 over
+length-delimited canonical identity. If those complete IDs collide, identities
+are sorted and receive deterministic numeric suffixes.
+
+## One tool per capability
+
+A control owned by a form is a parameter of that form's tool and is not also
+observed as a standalone tool. Emitting both gives an agent two ways to fill one
+field with no basis for choosing between them, and roughly doubles the tool count
+on form-heavy pages. Submit buttons are the deliberate exception: they are
+actions rather than parameters, and a form tool requires every required
+parameter, so dropping the standalone button would remove the ability to submit
+without also filling the form.
+
+Ownership follows HTML, not containment, so a control associated with a form by
+the `form` attribute is claimed exactly like a nested one.
 
 Evidence is deduplicated by provenance kind and reference, retaining the
 highest reported score. Confidence is the noisy-or of the sorted unique scores,

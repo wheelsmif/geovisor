@@ -40,11 +40,69 @@ function buildDOM() {
   // is silenced rather than allowed to pollute stdout.
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", () => {});
-  return new JSDOM(html, {
+  const dom = new JSDOM(html, {
     runScripts: "outside-only",
     url: FIXTURE_URL,
     virtualConsole,
   });
+  populateSrcdocFrames(dom.window.document);
+  return dom;
+}
+
+// jsdom creates a contentDocument for an iframe but never parses `srcdoc`, so a
+// fixture's declared frame content is written in explicitly. Real browsers do
+// this themselves. Frames nested inside srcdoc content are handled by repeating
+// until no unpopulated frame remains, bounded so a malformed fixture cannot spin.
+function populateSrcdocFrames(document, depth = 4) {
+  if (depth <= 0) return;
+  let populated = false;
+  for (const frame of document.querySelectorAll("iframe[srcdoc]")) {
+    const inner = frame.contentDocument;
+    if (!inner || inner.body?.hasChildNodes()) continue;
+    inner.body.innerHTML = frame.getAttribute("srcdoc");
+    populated = true;
+    populateSrcdocFrames(inner, depth - 1);
+  }
+  if (populated) populateSrcdocFrames(document, depth - 1);
+}
+
+// Element indexes span frame documents, because a frame locator is only correct
+// if it reaches an element *inside the right frame*. Frames are traversed in the
+// order the runtime numbers them so an index is stable and meaningful.
+function collectElements(document) {
+  const elements = [];
+  const visit = (root) => {
+    for (const element of root.querySelectorAll("*")) {
+      elements.push(element);
+      if (element.localName !== "iframe" && element.localName !== "frame") continue;
+      let inner = null;
+      try {
+        inner = element.contentDocument;
+      } catch {
+        inner = null;
+      }
+      if (inner?.documentElement) visit(inner);
+    }
+  };
+  visit(document);
+  return elements;
+}
+
+// An event raised inside a frame does not propagate to the parent document, so
+// every frame document needs its own listeners for the driver to see what a
+// frame-scoped action resolved to.
+function collectDocuments(root) {
+  const documents = [root];
+  for (const frame of root.querySelectorAll("iframe, frame")) {
+    let inner = null;
+    try {
+      inner = frame.contentDocument;
+    } catch {
+      inner = null;
+    }
+    if (inner?.documentElement) documents.push(...collectDocuments(inner));
+  }
+  return documents;
 }
 
 if (mode === "extract") {
@@ -67,7 +125,7 @@ async function executeModule() {
   // Elements are identified by their index in document order. Nothing is
   // stamped onto the DOM, so the document the module resolves against is the
   // same document the extractor saw.
-  const elements = Array.from(document.querySelectorAll("*"));
+  const elements = collectElements(document);
   const indexOf = (element) => elements.indexOf(element);
 
   // The runtime identifies itself by what it dispatches: `click` for click
@@ -77,18 +135,20 @@ async function executeModule() {
   // checked resolves correctly while changing nothing.
   const clicked = [];
   const dispatched = [];
-  document.addEventListener(
-    "click",
-    (event) => {
-      clicked.push(indexOf(event.target));
-      // Cancel navigation and submission: the driver observes which element was
-      // clicked, it does not exercise what the page would do next.
-      event.preventDefault();
-    },
-    true,
-  );
-  for (const name of ["input", "change"]) {
-    document.addEventListener(name, (event) => dispatched.push(indexOf(event.target)), true);
+  for (const scope of collectDocuments(document)) {
+    scope.addEventListener(
+      "click",
+      (event) => {
+        clicked.push(indexOf(event.target));
+        // Cancel navigation and submission: the driver observes which element
+        // was clicked, it does not exercise what the page would do next.
+        event.preventDefault();
+      },
+      true,
+    );
+    for (const name of ["input", "change"]) {
+      scope.addEventListener(name, (event) => dispatched.push(indexOf(event.target)), true);
+    }
   }
 
   const registrations = [];

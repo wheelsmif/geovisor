@@ -258,7 +258,8 @@
           "items": { "$ref": "#/$defs/semanticNode" }
         },
         "role": { "type": "string", "minLength": 1 },
-        "name": { "type": "string" }
+        "name": { "type": "string" },
+        "nth": { "type": "integer", "minimum": 0 }
       }
     },
     "semanticNode": {
@@ -267,7 +268,12 @@
       "required": ["role"],
       "properties": {
         "role": { "type": "string", "minLength": 1 },
-        "name": { "type": "string" }
+        "name": { "type": "string" },
+        "nth": {
+          "description": "Index among the elements matching this role and name, in document order. Absent means the first, and is the only valid form when the match is unique.",
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "actionBinding": {

@@ -21,6 +21,11 @@ import (
 
 const isolatedWorldName = "__geovisor_observer__"
 
+// frameRole is the role a frame path node addresses. It must stay equal to
+// FRAME_ROLE in client/src/shared/locate.ts, which is the consumer side of the
+// same contract.
+const frameRole = "iframe"
+
 type observeTargetOptions struct {
 	requestedURL   string
 	navigate       bool
@@ -359,6 +364,22 @@ func mergeFrameOwnerOrder(
 	if err != nil || document.Root == nil {
 		return
 	}
+	collectFrameOwnerOrder(target, document.Root)
+}
+
+// collectFrameOwnerOrder walks a pierced DOM tree and records each document's
+// child frames in the order a page-JS walk would see them. Extracted from the
+// CDP call so the ordering contract can be tested without a browser (GV-037).
+//
+// The walk is the Go counterpart of `frameCandidates` in client/src/shared/locate.ts:
+// pre-order, light children before shadow content, and no descent past a frame,
+// whose contents belong to a different document. The two implementations are
+// what keep FrameReference.Index and a runtime frame path node pointing at the
+// same element (GV-003).
+func collectFrameOwnerOrder(target map[proto.PageFrameID][]proto.PageFrameID, root *proto.DOMNode) {
+	if root == nil {
+		return
+	}
 	var walkDocument func(*proto.DOMNode, proto.PageFrameID)
 	var walkContent func(*proto.DOMNode, proto.PageFrameID)
 	walkDocument = func(node *proto.DOMNode, fallback proto.PageFrameID) {
@@ -393,7 +414,7 @@ func mergeFrameOwnerOrder(
 			walkDocument(node.ContentDocument, node.FrameID)
 		}
 	}
-	walkDocument(document.Root, document.Root.FrameID)
+	walkDocument(root, root.FrameID)
 	for parentID, children := range target {
 		target[parentID] = stableUniqueFrameIDs(children)
 	}
@@ -503,13 +524,30 @@ func augmentBatch(batch *observation.Batch, path []observation.FrameReference) {
 	}
 }
 
+// frameTraversalNodes converts a frame path into locator path nodes.
+//
+// A frame is addressed by its position among the containing document's frames,
+// which is what FrameReference.Index records and what mergeFrameOwnerOrder
+// numbers. Two things follow, and getting both wrong is GV-003:
+//
+// No CSS fallback. `:nth-child(N of iframe, frame)` counts among element
+// siblings, not among a document's frames, so on two single-frame wrappers
+// index 0 matches both elements and index 1 matches none. No CSS selector
+// expresses "the Nth frame of this document", and a selector that quietly
+// counts something else is worse than none: it resolves to the wrong frame
+// instead of reporting that it cannot resolve.
+//
+// No name. FrameReference.Name is the CDP frame name, taken from the element's
+// `name` or `id` attribute. That is not an accessible name and is not what the
+// consumer computes, so matching on it never succeeded for named frames, while
+// unnamed frames omitted the field and matched the first frame in the document.
+// The name stays on Interaction.FramePath, where it is a diagnostic rather than
+// a match key.
 func frameTraversalNodes(path []observation.FrameReference) []observation.PathNode {
 	result := make([]observation.PathNode, len(path))
 	for index, reference := range path {
-		semantic := &observation.SemanticNode{Role: "iframe", Name: reference.Name}
 		result[index] = observation.PathNode{
-			Semantic: semantic,
-			CSS:      fmt.Sprintf(":is(iframe, frame):nth-child(%d of iframe, frame)", reference.Index+1),
+			Semantic: &observation.SemanticNode{Role: frameRole, Nth: reference.Index},
 		}
 	}
 	return result

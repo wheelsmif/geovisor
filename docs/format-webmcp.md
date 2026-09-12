@@ -16,6 +16,17 @@ TIR locator candidates in deterministic order, traversing:
 3. semantic scope, role, and accessible name;
 4. CSS fallbacks.
 
+Role resolution, accessible-name computation, and element addressing come from
+`client/src/shared/`, the same source the extractor uses. The extractor records
+only semantic locators it has already resolved through that shared matcher, so a
+recorded semantic locator is one this callback can resolve.
+
+Where several elements share a role and name, the locator carries `nth`, an
+index into the match set in document order. Frame path nodes are addressed by
+`nth` alone and carry no CSS fallback: no CSS selector expresses "the Nth frame
+of this document", and one that counts element siblings instead would resolve to
+the wrong frame rather than report that it cannot resolve.
+
 It supports click, fill, select, and check bindings, checks cancellation between
 actions, and reports the tool, action index, action kind, and locator failures
 when execution fails. Cross-origin frame DOM access and closed shadow roots
