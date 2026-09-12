@@ -75,23 +75,28 @@ func TestNewDocumentMarshalsCollectionsAsArrays(t *testing.T) {
 func TestValidateRejectsUnsafeExploration(t *testing.T) {
 	t.Parallel()
 
-	document := NewDocument(SourceMetadata{
-		Kind:              SourceLaunchURL,
-		ExecutionBoundary: ExecutionAgentOwned,
-	})
-	document.Tools = append(document.Tools, Tool{
-		Actions: []ActionBinding{{
-			Action: ActionClick,
-			SideEffect: SideEffect{
-				Class:              SideEffectSubmission,
-				SafeForExploration: true,
-			},
-		}},
-	})
-
-	err := document.Validate()
-	if !IsValidationError(err) {
-		t.Fatalf("expected ValidationError, got %T: %v", err, err)
+	for _, class := range []SideEffectClass{SideEffectNavigation, SideEffectSubmission, SideEffectUnknown} {
+		class := class
+		t.Run(string(class), func(t *testing.T) {
+			t.Parallel()
+			document := NewDocument(SourceMetadata{
+				Kind:              SourceLaunchURL,
+				ExecutionBoundary: ExecutionAgentOwned,
+			})
+			document.Tools = append(document.Tools, Tool{
+				Actions: []ActionBinding{{
+					Action: ActionClick,
+					SideEffect: SideEffect{
+						Class:              class,
+						SafeForExploration: true,
+					},
+				}},
+			})
+			err := document.Validate()
+			if !IsValidationError(err) {
+				t.Fatalf("expected ValidationError, got %T: %v", err, err)
+			}
+		})
 	}
 }
 

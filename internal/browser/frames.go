@@ -86,13 +86,14 @@ func observeTarget(
 		return result, operationError(ctx, ErrorFrameDiscovery, "frames.tree", "read browser frame tree", err)
 	}
 
-	oopifSessions, oopifTrees, detach := attachOOPIFSessions(ctx, browser, targetID)
+	oopifSessions, oopifTrees, detach := attachOOPIFSessions(ctx, browser, targetID, tree.FrameTree)
 	defer detach()
 	frames := flattenCompleteFrameTree(tree.FrameTree, rootSession, oopifSessions, oopifTrees)
 	batch := observation.Batch{
 		CoverageReported: true,
 		Frames:           make([]observation.Frame, 0, len(frames)),
 		Interactions:     []observation.Interaction{},
+		Warnings:         []observation.Warning{},
 	}
 
 	for _, frame := range frames {
@@ -113,6 +114,7 @@ func observeTarget(
 		} else {
 			augmentBatch(&extracted, frame.path)
 			batch.Interactions = append(batch.Interactions, extracted.Interactions...)
+			batch.Warnings = append(batch.Warnings, extracted.Warnings...)
 		}
 		batch.Frames = append(batch.Frames, fact)
 	}
@@ -136,16 +138,52 @@ func observeTarget(
 	return result, nil
 }
 
+func sessionMainFrameID(session *sessionClient) (proto.PageFrameID, error) {
+	tree, err := (proto.PageGetFrameTree{}).Call(session)
+	if err != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
+		if err == nil {
+			err = errors.New("page frame tree is empty")
+		}
+		return "", err
+	}
+	return tree.FrameTree.Frame.ID, nil
+}
+
+func evaluateIsolated(
+	session *sessionClient,
+	frameID proto.PageFrameID,
+	expression string,
+	awaitPromise bool,
+	timeout proto.RuntimeTimeDelta,
+) (*proto.RuntimeEvaluateResult, error) {
+	world, err := (proto.PageCreateIsolatedWorld{
+		FrameID: frameID, WorldName: isolatedWorldName,
+	}).Call(session)
+	if err != nil {
+		return nil, err
+	}
+	params := proto.RuntimeEvaluate{
+		Expression:    expression,
+		ContextID:     world.ExecutionContextID,
+		AwaitPromise:  awaitPromise,
+		ReturnByValue: true,
+	}
+	if timeout != 0 {
+		params.Timeout = timeout
+	}
+	return params.Call(session)
+}
+
 func waitForDocumentReady(ctx context.Context, session *sessionClient) error {
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		result, err := (proto.RuntimeEvaluate{
-			Expression:    "document.readyState === 'complete'",
-			ReturnByValue: true,
-		}).Call(session)
-		if err == nil && result.ExceptionDetails == nil && result.Result != nil && result.Result.Value.Bool() {
-			return nil
+		frameID, err := sessionMainFrameID(session)
+		if err == nil {
+			result, evalErr := evaluateIsolated(session, frameID, "document.readyState === 'complete'", false, 0)
+			if evalErr == nil && result.ExceptionDetails == nil && result.Result != nil && result.Result.Value.Bool() {
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -159,6 +197,10 @@ func waitForDOMQuiet(
 	session *sessionClient,
 	quietPeriod, limit time.Duration,
 ) (bool, error) {
+	frameID, err := sessionMainFrameID(session)
+	if err != nil {
+		return false, err
+	}
 	quietMS := quietPeriod.Milliseconds()
 	limitMS := limit.Milliseconds()
 	expression := fmt.Sprintf(`new Promise(resolve => {
@@ -170,10 +212,10 @@ func waitForDOMQuiet(
 		const deadline = setTimeout(() => finish(false), %d);
 		arm();
 	})`, quietMS, limitMS)
-	result, err := (proto.RuntimeEvaluate{
-		Expression: expression, AwaitPromise: true, ReturnByValue: true,
-		Timeout: proto.RuntimeTimeDelta(limitMS + quietMS + 100),
-	}).Call(session)
+	result, err := evaluateIsolated(
+		session, frameID, expression, true,
+		proto.RuntimeTimeDelta(limitMS+quietMS+100),
+	)
 	if err != nil {
 		return false, err
 	}
@@ -190,6 +232,7 @@ func attachOOPIFSessions(
 	ctx context.Context,
 	browser *rod.Browser,
 	rootTargetID proto.TargetTargetID,
+	rootTree *proto.PageFrameTree,
 ) (
 	map[proto.PageFrameID]*sessionClient,
 	map[proto.PageFrameID]*proto.PageFrameTree,
@@ -198,6 +241,8 @@ func attachOOPIFSessions(
 	result := make(map[proto.PageFrameID]*sessionClient)
 	trees := make(map[proto.PageFrameID]*proto.PageFrameTree)
 	var attached []*sessionClient
+	allowed := descendantFrameIDs(rootTree)
+	seen := make(map[proto.TargetTargetID]struct{})
 	targets, err := (proto.TargetGetTargets{}).Call(browser.Context(ctx))
 	if err == nil {
 		sort.Slice(targets.TargetInfos, func(i, j int) bool {
@@ -206,28 +251,41 @@ func attachOOPIFSessions(
 			}
 			return targets.TargetInfos[i].TargetID < targets.TargetInfos[j].TargetID
 		})
-		for _, target := range targets.TargetInfos {
-			if target == nil || string(target.Type) != "iframe" || target.TargetID == rootTargetID {
-				continue
-			}
-			attachContext, cancel := context.WithTimeout(ctx, defaultDOMQuietLimit)
-			session, attachErr := attachTarget(attachContext, browser, target.TargetID)
-			if attachErr != nil {
+		// Nested OOPIFs may appear only after a parent OOPIF is attached, so
+		// repeat until a pass attaches nothing new.
+		for progress := true; progress; {
+			progress = false
+			for _, target := range targets.TargetInfos {
+				if _, done := seen[target.TargetID]; done {
+					continue
+				}
+				if !isDescendantIFrameTarget(allowed, rootTargetID, target) {
+					continue
+				}
+				seen[target.TargetID] = struct{}{}
+				progress = true
+				attachContext, cancel := context.WithTimeout(ctx, defaultDOMQuietLimit)
+				session, attachErr := attachTarget(attachContext, browser, target.TargetID)
+				if attachErr != nil {
+					cancel()
+					addUnattachedOOPIF(trees, target)
+					continue
+				}
+				tree, treeErr := (proto.PageGetFrameTree{}).Call(session)
+				session.ctx = ctx
 				cancel()
-				addUnattachedOOPIF(trees, target)
-				continue
+				if treeErr != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
+					detachTarget(browser, session.sessionID)
+					addUnattachedOOPIF(trees, target)
+					continue
+				}
+				result[tree.FrameTree.Frame.ID] = session
+				trees[tree.FrameTree.Frame.ID] = tree.FrameTree
+				attached = append(attached, session)
+				for frameID := range descendantFrameIDs(tree.FrameTree) {
+					allowed[frameID] = struct{}{}
+				}
 			}
-			tree, treeErr := (proto.PageGetFrameTree{}).Call(session)
-			session.ctx = ctx
-			cancel()
-			if treeErr != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
-				detachTarget(browser, session.sessionID)
-				addUnattachedOOPIF(trees, target)
-				continue
-			}
-			result[tree.FrameTree.Frame.ID] = session
-			trees[tree.FrameTree.Frame.ID] = tree.FrameTree
-			attached = append(attached, session)
 		}
 	}
 	return result, trees, func() {
@@ -235,6 +293,34 @@ func attachOOPIFSessions(
 			detachTarget(browser, attached[index].sessionID)
 		}
 	}
+}
+
+func descendantFrameIDs(tree *proto.PageFrameTree) map[proto.PageFrameID]struct{} {
+	result := make(map[proto.PageFrameID]struct{})
+	var walk func(*proto.PageFrameTree)
+	walk = func(node *proto.PageFrameTree) {
+		if node == nil || node.Frame == nil {
+			return
+		}
+		result[node.Frame.ID] = struct{}{}
+		for _, child := range node.ChildFrames {
+			walk(child)
+		}
+	}
+	walk(tree)
+	return result
+}
+
+func isDescendantIFrameTarget(
+	allowed map[proto.PageFrameID]struct{},
+	rootTargetID proto.TargetTargetID,
+	target *proto.TargetTargetInfo,
+) bool {
+	if target == nil || string(target.Type) != "iframe" || target.TargetID == rootTargetID {
+		return false
+	}
+	_, ok := allowed[proto.PageFrameID(target.TargetID)]
+	return ok
 }
 
 func addUnattachedOOPIF(
@@ -490,6 +576,7 @@ func extractFrame(
 		return observation.Batch{}, DiagnosticFrameUncovered,
 			"browser payload returned malformed observation JSON in this frame"
 	}
+	batch.Warnings = append(batch.Warnings, closedShadowWarnings(&session, frame.frame.ID)...)
 	return batch, "", ""
 }
 
@@ -510,6 +597,9 @@ func decodeBatchStrict(data []byte) (observation.Batch, error) {
 	if batch.Interactions == nil {
 		batch.Interactions = []observation.Interaction{}
 	}
+	if batch.Warnings == nil {
+		batch.Warnings = []observation.Warning{}
+	}
 	return batch, nil
 }
 
@@ -522,6 +612,69 @@ func augmentBatch(batch *observation.Batch, path []observation.FrameReference) {
 			interaction.Locators[locatorIndex].FramePath = clonePathNodes(nodes)
 		}
 	}
+	for index := range batch.Warnings {
+		if len(batch.Warnings[index].FramePath) == 0 {
+			batch.Warnings[index].FramePath = cloneFramePath(path)
+		}
+	}
+}
+
+func closedShadowWarnings(
+	session *sessionClient,
+	frameID proto.PageFrameID,
+) []observation.Warning {
+	depth := -1
+	document, err := (proto.DOMGetDocument{Depth: &depth, Pierce: true}).Call(session)
+	if err != nil || document.Root == nil {
+		return nil
+	}
+	return collectClosedShadows(document.Root, frameID)
+}
+
+func collectClosedShadows(root *proto.DOMNode, documentFrameID proto.PageFrameID) []observation.Warning {
+	var warnings []observation.Warning
+	var walk func(*proto.DOMNode, proto.PageFrameID)
+	walk = func(node *proto.DOMNode, frameID proto.PageFrameID) {
+		if node == nil {
+			return
+		}
+		if node.FrameID != "" {
+			frameID = node.FrameID
+		}
+		inTarget := frameID == documentFrameID
+		if inTarget {
+			for _, shadow := range node.ShadowRoots {
+				if shadow != nil && shadow.ShadowRootType == proto.DOMShadowRootTypeClosed {
+					warnings = append(warnings, observation.Warning{
+						Code:    observation.WarningClosedShadowRoot,
+						Message: "closed shadow root on " + closedShadowHostLabel(node),
+					})
+				}
+				walk(shadow, frameID)
+			}
+		}
+		for _, child := range node.Children {
+			walk(child, frameID)
+		}
+		if node.ContentDocument != nil {
+			walk(node.ContentDocument, node.FrameID)
+		}
+	}
+	walk(root, documentFrameID)
+	return warnings
+}
+
+func closedShadowHostLabel(node *proto.DOMNode) string {
+	name := strings.ToLower(node.LocalName)
+	if name == "" {
+		name = "element"
+	}
+	for index := 0; index+1 < len(node.Attributes); index += 2 {
+		if node.Attributes[index] == "id" && node.Attributes[index+1] != "" {
+			return name + "#" + node.Attributes[index+1]
+		}
+	}
+	return name
 }
 
 // frameTraversalNodes converts a frame path into locator path nodes.

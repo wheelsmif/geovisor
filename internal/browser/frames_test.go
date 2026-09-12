@@ -340,6 +340,91 @@ func TestAddUnattachedOOPIFRecordsOriginFromURL(t *testing.T) {
 	}
 }
 
+func TestDescendantIFrameFilterIgnoresForeignTargets(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.PageFrameTree{
+		Frame: &proto.PageFrame{ID: "root"},
+		ChildFrames: []*proto.PageFrameTree{{
+			Frame: &proto.PageFrame{ID: "child-oopif"},
+		}},
+	}
+	allowed := descendantFrameIDs(root)
+	if !isDescendantIFrameTarget(allowed, "page", &proto.TargetTargetInfo{
+		TargetID: "child-oopif", Type: "iframe",
+	}) {
+		t.Fatal("selected-page OOPIF was rejected")
+	}
+	if isDescendantIFrameTarget(allowed, "page", &proto.TargetTargetInfo{
+		TargetID: "other-tab-iframe", Type: "iframe",
+	}) {
+		t.Fatal("foreign iframe target was accepted")
+	}
+	if isDescendantIFrameTarget(allowed, "page", &proto.TargetTargetInfo{
+		TargetID: "child-oopif", Type: proto.TargetTargetInfoTypePage,
+	}) {
+		t.Fatal("page target was accepted as an iframe")
+	}
+}
+
+func TestCollectClosedShadowsRecordsAuthorClosedRoots(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.DOMNode{
+		FrameID: "root",
+		Children: []*proto.DOMNode{{
+			LocalName:  "widget-host",
+			Attributes: []string{"id", "account"},
+			ShadowRoots: []*proto.DOMNode{{
+				ShadowRootType: proto.DOMShadowRootTypeClosed,
+				Children: []*proto.DOMNode{{
+					LocalName: "button",
+				}},
+			}},
+		}, {
+			LocalName: "input",
+			ShadowRoots: []*proto.DOMNode{{
+				ShadowRootType: proto.DOMShadowRootTypeUserAgent,
+			}},
+		}},
+	}
+
+	warnings := collectClosedShadows(root, "root")
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %d, want 1: %+v", len(warnings), warnings)
+	}
+	if warnings[0].Code != observation.WarningClosedShadowRoot {
+		t.Fatalf("code = %q", warnings[0].Code)
+	}
+	if warnings[0].Message != "closed shadow root on widget-host#account" {
+		t.Fatalf("message = %q", warnings[0].Message)
+	}
+
+	nested := &proto.DOMNode{
+		FrameID: "root",
+		Children: []*proto.DOMNode{{
+			LocalName: "iframe",
+			FrameID:   "child",
+			ContentDocument: &proto.DOMNode{
+				FrameID: "child",
+				Children: []*proto.DOMNode{{
+					LocalName: "host",
+					ShadowRoots: []*proto.DOMNode{{
+						ShadowRootType: proto.DOMShadowRootTypeClosed,
+					}},
+				}},
+			},
+		}},
+	}
+	if got := collectClosedShadows(nested, "root"); len(got) != 0 {
+		t.Fatalf("root frame reported a child-frame shadow: %+v", got)
+	}
+	childWarnings := collectClosedShadows(nested, "child")
+	if len(childWarnings) != 1 || childWarnings[0].Message != "closed shadow root on host" {
+		t.Fatalf("child-frame shadows = %+v", childWarnings)
+	}
+}
+
 func TestOriginForURLRejectsUnusableURLs(t *testing.T) {
 	t.Parallel()
 

@@ -19,6 +19,13 @@ function page(html, setup) {
   return dom;
 }
 
+// jsdom does not ship the UA rule that hides closed <details> content.
+function hideClosedDetailsContent(window) {
+  const style = window.document.createElement("style");
+  style.textContent = "details:not([open]) > *:not(summary) { display: none !important; }";
+  window.document.head.appendChild(style);
+}
+
 function interactions(batch, kind) {
   return batch.interactions.filter((interaction) => interaction.kind === kind);
 }
@@ -85,7 +92,9 @@ test("safe exploration opens details without clicks, submits, navigation, or fet
   let clicks = 0;
   let submits = 0;
   let fetches = 0;
-  const dom = page("<details><summary>Advanced</summary><button>Apply</button></details>", (window) => {
+  const html = "<details><summary>Advanced</summary><button>Apply</button></details>";
+  const dom = page(html, (window) => {
+    hideClosedDetailsContent(window);
     window.HTMLElement.prototype.click = () => {
       clicks++;
     };
@@ -100,13 +109,15 @@ test("safe exploration opens details without clicks, submits, navigation, or fet
       throw new Error("network forbidden");
     };
   });
+  const before = dom.window.document.documentElement.outerHTML;
 
   const batch = await dom.window.__GEOVISOR_EXTRACT__({
     safeExplore: true,
     maxDepth: 1,
     maxOperations: 1,
   });
-  assert.equal(dom.window.document.querySelector("details").open, true);
+  assert.equal(dom.window.document.querySelector("details").open, false);
+  assert.equal(dom.window.document.documentElement.outerHTML, before);
   assert.equal(clicks, 0);
   assert.equal(submits, 0);
   assert.equal(fetches, 0);
@@ -116,23 +127,96 @@ test("safe exploration opens details without clicks, submits, navigation, or fet
       (evidence) => evidence.reference === "exploration:details-opened-without-click",
     ),
   );
+  assert.ok(interactions(batch, "action").some((action) => action.name === "Apply"));
 });
 
-test("safe exploration obeys operation and depth caps", async () => {
-  const dom = page(`
-    <details><summary>One</summary><details><summary>Nested</summary></details></details>
-    <details><summary>Two</summary></details>
-  `);
+// GV-009. A microtask yield never ran toggle handlers. A macrotask does, so a
+// details whose body is populated on toggle is visible to the second traverse.
+test("safe exploration yields revealed controls from a toggle handler", async () => {
+  const dom = page("<details><summary>Advanced</summary></details>", (window) => {
+    window.document.querySelector("details").addEventListener("toggle", (event) => {
+      const details = event.currentTarget;
+      if (!details.open || details.querySelector("input")) return;
+      const input = window.document.createElement("input");
+      input.setAttribute("aria-label", "Revealed field");
+      details.appendChild(input);
+    });
+  });
 
-  await dom.window.__GEOVISOR_EXTRACT__({
+  const batch = await dom.window.__GEOVISOR_EXTRACT__({
     safeExplore: true,
-    maxDepth: 0,
+    maxDepth: 1,
     maxOperations: 1,
   });
+  assert.equal(dom.window.document.querySelector("details").open, false);
+  assert.ok(interactions(batch, "control").some((control) => control.name === "Revealed field"));
+});
+
+// GV-010. Depth 0 is no exploration. The operations cap is a separate budget.
+test("safe exploration treats depth 0 as no exploration", async () => {
+  const dom = page(`
+    <details><summary>One</summary><button>First</button></details>
+    <details><summary>Two</summary><button>Second</button></details>
+  `, hideClosedDetailsContent);
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__({
+    safeExplore: true,
+    maxDepth: 0,
+    maxOperations: 100,
+  });
   const details = dom.window.document.querySelectorAll("details");
-  assert.equal(details[0].open, true);
+  assert.equal(details[0].open, false);
   assert.equal(details[1].open, false);
-  assert.equal(details[2].open, false);
+  assert.equal(
+    interactions(batch, "action").some((action) => action.name === "First"),
+    false,
+  );
+});
+
+test("safe exploration distinguishes the operations cap from the depth cap", async () => {
+  const html = `
+    <details><summary>One</summary><button>First</button>
+      <details><summary>Nested</summary><button>Deep</button></details>
+    </details>
+    <details><summary>Two</summary><button>Second</button></details>
+  `;
+
+  const depthLimited = await page(html, hideClosedDetailsContent).window.__GEOVISOR_EXTRACT__({
+    safeExplore: true,
+    maxDepth: 1,
+    maxOperations: 100,
+  });
+  const depthNames = interactions(depthLimited, "action").map((action) => action.name);
+  assert.equal(depthNames.includes("First"), true);
+  assert.equal(depthNames.includes("Second"), true);
+  assert.equal(depthNames.includes("Deep"), false);
+
+  const operationLimited = await page(html, hideClosedDetailsContent).window.__GEOVISOR_EXTRACT__({
+    safeExplore: true,
+    maxDepth: 2,
+    maxOperations: 1,
+  });
+  const operationNames = interactions(operationLimited, "action").map((action) => action.name);
+  assert.equal(operationNames.includes("First"), true);
+  assert.equal(operationNames.includes("Second"), false);
+  assert.equal(operationNames.includes("Deep"), false);
+});
+
+test("safe exploration enforces the time budget independently of operations", async () => {
+  const html = `
+    <details><summary>One</summary><button>First</button></details>
+    <details><summary>Two</summary><button>Second</button></details>
+  `;
+  const batch = await page(html, hideClosedDetailsContent).window.__GEOVISOR_EXTRACT__({
+    safeExplore: true,
+    maxDepth: 1,
+    maxOperations: 100,
+    timeoutMs: 0,
+  });
+  assert.equal(
+    interactions(batch, "action").some((action) => action.name === "First"),
+    false,
+  );
 });
 
 test("keeps duplicate names distinct within the same semantic scope", async () => {
@@ -299,6 +383,27 @@ test("treats contenteditable as editable only when its value says so", async () 
     Array.from(interactions(batch, "control"), (item) => item.name),
     ["Bare", "Empty", "True", "Plaintext"],
   );
+});
+
+// GV-030. A throw while building one interaction is isolated and counted.
+test("reports a warning when an element cannot be extracted", async () => {
+  const dom = page(`
+    <input aria-label="Visible">
+    <input aria-label="Hostile">
+  `);
+  const hostile = [...dom.window.document.querySelectorAll("input")].at(-1);
+  hostile.matches = () => {
+    throw new Error("hostile element");
+  };
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    ["Visible"],
+  );
+  assert.equal(batch.warnings.length, 1);
+  assert.equal(batch.warnings[0].code, "element_extraction_failed");
+  assert.match(batch.warnings[0].message, /1 element/u);
 });
 
 test("repeated extraction is deterministic", async () => {

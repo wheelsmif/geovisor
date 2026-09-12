@@ -37,13 +37,17 @@ browser source owns frame discovery, same-session CDP execution, and combining
 frame-local batches.
 
 Safe exploration is opt-in. It performs bounded, direct local state changes
-only; currently it may open eligible `<details>` elements. It never invokes
-click, submit, navigation, value-changing, or network APIs. Unknown effects
-remain unsafe. `timeoutMs` only cancels further exploration work.
+only; currently it may open eligible `<details>` elements, yields so `toggle`
+handlers can run, and restores each element's prior `open` state before
+returning. `maxDepth: 0` performs no exploration. It never invokes click,
+submit, navigation, value-changing, or network APIs. Unknown effects remain
+unsafe. `timeoutMs` is a real deadline across that async work.
 
 The extractor never reads current control values. Hidden inputs are skipped,
 password fields are represented structurally, and select enums use visible
-option labels rather than option values.
+option labels rather than option values. Element-level extraction failures
+are counted as batch warnings. Closed shadow roots are invisible to page
+JavaScript and are reported by the browser source via CDP.
 
 ## WebMCP runtime
 

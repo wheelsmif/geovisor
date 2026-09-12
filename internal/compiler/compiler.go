@@ -134,6 +134,26 @@ func Compile(input Input) (*tir.Document, error) {
 			}
 		}
 
+		for warningIndex, warning := range batch.Warnings {
+			field := fmt.Sprintf("batches[%d].warnings[%d]", batchIndex, warningIndex)
+			if err := validateRawFramePath(field+".framePath", warning.FramePath); err != nil {
+				return nil, err
+			}
+			code := cleanText(warning.Code)
+			message := cleanText(warning.Message)
+			if code == "" {
+				return nil, &Error{Field: field + ".code", Code: "required", Message: "must not be empty"}
+			}
+			if message == "" {
+				return nil, &Error{Field: field + ".message", Code: "required", Message: "must not be empty"}
+			}
+			warnings = append(warnings, pendingWarning{
+				code:      code,
+				message:   message,
+				framePath: normalizeFrameReferences(warning.FramePath),
+			})
+		}
+
 		for interactionIndex, interaction := range batch.Interactions {
 			field := fmt.Sprintf("batches[%d].interactions[%d]", batchIndex, interactionIndex)
 			if err := validateRawFramePath(field+".framePath", interaction.FramePath); err != nil {

@@ -106,10 +106,17 @@ export interface Interaction {
   evidence: Evidence[];
 }
 
+export interface Warning {
+  code: string;
+  message: string;
+  framePath?: FrameReference[];
+}
+
 export interface Batch {
   coverageReported: boolean;
   frames: Frame[];
   interactions: Interaction[];
+  warnings: Warning[];
 }
 
 export interface ExtractionOptions {

@@ -199,7 +199,7 @@ func newInspectCommand(stdout, stderr io.Writer, dependencies Dependencies) *cob
 	flags.DurationVar(&options.Timeout, "timeout", options.Timeout, "overall browser operation timeout")
 	flags.DurationVar(&options.DOMQuiet, "dom-quiet", options.DOMQuiet, "required DOM quiet period")
 	flags.DurationVar(&options.DOMQuietTimeout, "dom-quiet-timeout", options.DOMQuietTimeout, "maximum DOM quiet wait")
-	flags.IntVar(&options.Depth, "depth", options.Depth, "safe exploration depth (0-16)")
+	flags.IntVar(&options.Depth, "depth", options.Depth, "safe exploration depth (0 = none, 1-16 = nested <details> levels)")
 	flags.IntVar(&options.MaxOperations, "max-operations", options.MaxOperations, "safe exploration operation limit (0-500)")
 	flags.DurationVar(&options.ExplorationTimeout, "exploration-timeout", options.ExplorationTimeout, "safe exploration time limit")
 	flags.BoolVar(&options.SafeExplore, "safe-explore", false, "enable non-navigating, non-submitting safe exploration")

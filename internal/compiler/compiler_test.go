@@ -54,6 +54,21 @@ func TestCompileAggregatesDeterministically(t *testing.T) {
 	assertWarning(t, document, "frame_uncovered")
 }
 
+func TestCompileCopiesObservationWarnings(t *testing.T) {
+	t.Parallel()
+
+	input := fixtureInput()
+	input.Batches[0].Warnings = []observation.Warning{{
+		Code:    observation.WarningElementExtractionFailed,
+		Message: "2 element(s) could not be extracted",
+	}}
+	document, err := Compile(input)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	assertWarning(t, document, observation.WarningElementExtractionFailed)
+}
+
 func TestCompileDoesNotCollapseDistinctScopes(t *testing.T) {
 	t.Parallel()
 

@@ -28,10 +28,20 @@ It does not host an MCP daemon or call an LLM service. Treat inspected pages and
 generated artifacts as untrusted input and potentially sensitive output.
 
 Safe exploration must never submit, navigate, or issue network requests.
-Stealth is explicit opt-in and is not an access-control bypass. Inaccessible
-frames remain visible as partial coverage. Current field values, password
-values, hidden controls, and option value identifiers must never enter TIR or
-emitter output.
+Bindings classified `unknown` cannot be asserted as safe to explore. When
+safe exploration is enabled it restores any `<details>` `open` state it
+changed. Stealth is explicit opt-in and is not an access-control bypass.
+Inaccessible frames remain visible as partial coverage. Closed shadow roots
+and suppressed element-level extraction failures are reported as warnings.
+Current field values, password values, hidden controls, and option value
+identifiers must never enter TIR or emitter output.
+
+Tool names, descriptions, and other labels originate in page text
+(`aria-label`, `title`, `textContent`). Treat generated artifacts as
+untrusted model input: a hostile page can choose that text. WebMCP sets
+`untrustedContentHint` on every registered tool to reflect this provenance.
+JSON escaping prevents `</script>` injection into emitted modules; it does
+not make page-derived strings safe to follow as instructions.
 
 Owned Chromium launches disable go-rod's leakless helper at runtime. The
 transitive module remains in dependency metadata because go-rod imports it.

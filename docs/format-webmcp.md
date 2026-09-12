@@ -35,8 +35,9 @@ fail explicitly. The emitter also rejects actions with no locator candidate.
 
 WebMCP annotations use the Chrome 153 names. `readOnlyHint` is true only when
 all actions have side effect `none`; `consequentialHint` is true for network,
-navigation, submission, or unknown effects. `untrustedContentHint` is false
-because generated callbacks return only a fixed execution acknowledgement.
+navigation, submission, or unknown effects. `untrustedContentHint` is true
+because tool names and descriptions originate in page text and must be treated
+as untrusted model input.
 
 Descriptions, names, locators, and enum values are serialized as data, never
 as source text. JSON escaping prevents literal `</script>`, U+2028, and U+2029

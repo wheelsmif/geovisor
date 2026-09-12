@@ -25,7 +25,20 @@ type Batch struct {
 	CoverageReported bool          `json:"coverageReported"`
 	Frames           []Frame       `json:"frames"`
 	Interactions     []Interaction `json:"interactions"`
+	Warnings         []Warning     `json:"warnings"`
 }
+
+// Warning is an explicit coverage or extraction gap that is not a tool.
+type Warning struct {
+	Code      string           `json:"code"`
+	Message   string           `json:"message"`
+	FramePath []FrameReference `json:"framePath,omitempty"`
+}
+
+const (
+	WarningElementExtractionFailed = "element_extraction_failed"
+	WarningClosedShadowRoot        = "closed_shadow_root"
+)
 
 // Frame records whether a discovered frame could be observed.
 type Frame struct {

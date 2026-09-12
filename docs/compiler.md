@@ -34,7 +34,9 @@ highest reported score. Confidence is the noisy-or of the sorted unique scores,
 rounded to six decimal places. Missing evidence receives a `0.5` heuristic
 fallback. Conflicting side-effect reports select the most conservative class;
 safe exploration requires every report to be safe and is always false for
-navigation and submission.
+navigation, submission, and unknown. Observation-batch warnings (element
+extraction failures, closed shadow roots) are copied into the TIR `warnings`
+collection.
 
 Coverage is `unavailable` when no batch reports it, `partial` when any known
 frame is inaccessible, and `complete` otherwise. Conflicting accessibility

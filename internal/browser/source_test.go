@@ -90,27 +90,23 @@ func TestSelectTargetDeterministically(t *testing.T) {
 		{TargetID: "worker", Type: proto.TargetTargetInfoTypeServiceWorker, URL: "https://a.example/sw.js"},
 	}
 
-	selected, err := selectTarget(targets, TargetSelector{Mode: SelectActiveTopLevel}, nil)
-	if err != nil {
-		t.Fatalf("select fallback: %v", err)
-	}
-	if selected.TargetID != "a" {
-		t.Fatalf("fallback target = %q, want canonical first a", selected.TargetID)
+	if _, err := selectTarget(targets, TargetSelector{Mode: SelectActiveTopLevel}); err == nil {
+		t.Fatal("active selector unexpectedly chose a page among several top-level candidates")
 	}
 
-	selected, err = selectTarget(
-		targets,
+	selected, err := selectTarget(
+		[]*proto.TargetTargetInfo{
+			{TargetID: "only", Type: proto.TargetTargetInfoTypePage, URL: "https://a.example/"},
+		},
 		TargetSelector{Mode: SelectActiveTopLevel},
-		map[proto.TargetTargetID]bool{"z": true},
 	)
-	if err != nil || selected.TargetID != "z" {
-		t.Fatalf("active target = %v, %v; want z", selected, err)
+	if err != nil || selected.TargetID != "only" {
+		t.Fatalf("single active target = %v, %v; want only", selected, err)
 	}
 
 	selected, err = selectTarget(
 		targets,
 		TargetSelector{Mode: SelectExactURL, URL: "https://a.example/"},
-		nil,
 	)
 	if err != nil || selected.TargetID != "a" {
 		t.Fatalf("exact URL target = %v, %v; want canonical duplicate a", selected, err)

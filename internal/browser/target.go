@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 
 	"github.com/go-rod/rod"
@@ -64,20 +65,14 @@ func chooseTarget(
 	if err != nil {
 		return nil, err
 	}
-	focused := make(map[proto.TargetTargetID]bool)
-	if selector.Mode == SelectActiveTopLevel {
-		candidates := canonicalTopLevelTargets(response.TargetInfos)
-		for _, candidate := range candidates {
-			focused[candidate.TargetID] = targetHasFocus(ctx, browser, candidate.TargetID)
-		}
-	}
-	return selectTarget(response.TargetInfos, selector, focused)
+	// Never attach to a tab to ask whether it has focus (GV-011). Selection
+	// uses only Target.getTargets plus the caller's explicit selector.
+	return selectTarget(response.TargetInfos, selector)
 }
 
 func selectTarget(
 	targets []*proto.TargetTargetInfo,
 	selector TargetSelector,
-	focused map[proto.TargetTargetID]bool,
 ) (*proto.TargetTargetInfo, error) {
 	candidates := canonicalTopLevelTargets(targets)
 	switch selector.Mode {
@@ -94,13 +89,14 @@ func selectTarget(
 			}
 		}
 	case SelectActiveTopLevel:
-		for _, candidate := range candidates {
-			if focused[candidate.TargetID] {
-				return candidate, nil
-			}
-		}
-		if len(candidates) > 0 {
+		if len(candidates) == 1 {
 			return candidates[0], nil
+		}
+		if len(candidates) > 1 {
+			return nil, fmt.Errorf(
+				"multiple top-level HTTP(S) pages are open (%d); pass --target id:<id> or --target url:<url>",
+				len(candidates),
+			)
 		}
 	}
 	return nil, errors.New("no matching top-level HTTP(S) target")
@@ -127,17 +123,4 @@ func canonicalTopLevelTargets(targets []*proto.TargetTargetInfo) []*proto.Target
 		return result[i].TargetID < result[j].TargetID
 	})
 	return result
-}
-
-func targetHasFocus(ctx context.Context, browser *rod.Browser, targetID proto.TargetTargetID) bool {
-	session, err := attachTarget(ctx, browser, targetID)
-	if err != nil {
-		return false
-	}
-	defer detachTarget(browser, session.sessionID)
-	result, err := (proto.RuntimeEvaluate{
-		Expression:    "document.hasFocus()",
-		ReturnByValue: true,
-	}).Call(session)
-	return err == nil && result.ExceptionDetails == nil && result.Result != nil && result.Result.Value.Bool()
 }

@@ -133,7 +133,8 @@ const (
 )
 
 // TargetSelector is explicit and deterministic. The zero value selects the
-// focused top-level page, falling back to canonical URL/title order.
+// only top-level HTTP(S) page. If more than one is open, the caller must
+// pass an exact target ID or URL; attach never probes other tabs for focus.
 type TargetSelector struct {
 	Mode     TargetSelectionMode
 	TargetID string

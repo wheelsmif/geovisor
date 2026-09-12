@@ -124,9 +124,8 @@ func validateDocument(d *Document) error {
 			if !validSideEffectClass(action.SideEffect.Class) {
 				return invalid(actionPath+".sideEffect.class", "invalid_side_effect", "contains an unsupported value")
 			}
-			if action.SideEffect.SafeForExploration &&
-				(action.SideEffect.Class == SideEffectNavigation || action.SideEffect.Class == SideEffectSubmission) {
-				return invalid(actionPath+".sideEffect", "unsafe_exploration", "navigation and submission cannot be safe for exploration")
+			if action.SideEffect.SafeForExploration && unsafeToExplore(action.SideEffect.Class) {
+				return invalid(actionPath+".sideEffect", "unsafe_exploration", "navigation, submission, and unknown cannot be safe for exploration")
 			}
 		}
 	}
@@ -331,6 +330,10 @@ func validActionKind(kind ActionKind) bool {
 	default:
 		return false
 	}
+}
+
+func unsafeToExplore(class SideEffectClass) bool {
+	return class == SideEffectNavigation || class == SideEffectSubmission || class == SideEffectUnknown
 }
 
 func validSideEffectClass(class SideEffectClass) bool {

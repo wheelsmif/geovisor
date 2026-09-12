@@ -13,6 +13,7 @@ import type {
   SemanticNode,
   SideEffect,
   ValueType,
+  Warning,
 } from "./types";
 import { cleanText, DESCRIPTION_LIMIT, humanize } from "./shared/text";
 import { explicitRole, inputType, parentAcrossShadow, read, referencedText } from "./shared/dom";
@@ -604,31 +605,67 @@ function detailsDepth(element: Element): number {
   return depth;
 }
 
+/** A macrotask, so `toggle` handlers and layout run before the next open. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+interface OpenedDetails {
+  element: HTMLDetailsElement;
+  wasOpen: boolean;
+}
+
+/**
+ * Opens eligible `<details>` so a later traverse can see revealed controls.
+ *
+ * The caller must invoke `restore` after that traverse (and on any failure)
+ * so attach mode does not leave a live tab mutated (GV-008). Opening is
+ * bounded by depth, operations, and a real deadline across the yields
+ * (GV-009, GV-010). `--depth 0` is no exploration: a top-level `<details>`
+ * has depth 0, so the guard is `depth < maxDepth`.
+ */
 async function exploreSafely(
   records: ElementRecord[],
   options: NormalizedOptions,
-): Promise<ExplorationResult> {
-  const result: ExplorationResult = { details: new Set(), focused: new Set() };
-  if (!options.safeExplore || options.maxOperations === 0) return result;
-
-  const deadline = performance.now() + options.timeoutMs;
-  let operations = 0;
-  for (const record of records) {
-    if (operations >= options.maxOperations || performance.now() >= deadline) break;
-    if (
-      record.element instanceof HTMLDetailsElement &&
-      !record.element.hasAttribute("disabled") &&
-      detailsDepth(record.element) <= options.maxDepth
-    ) {
-      operations++;
-      result.details.add(record.element);
-      read(undefined, () => {
-        record.element.setAttribute("open", "");
-      });
+): Promise<{ exploration: ExplorationResult; restore: () => void }> {
+  const exploration: ExplorationResult = { details: new Set(), focused: new Set() };
+  const opened: OpenedDetails[] = [];
+  const restore = (): void => {
+    for (const item of opened) {
+      item.element.open = item.wasOpen;
     }
+  };
+  if (!options.safeExplore || options.maxOperations === 0 || options.maxDepth === 0) {
+    return { exploration, restore };
   }
-  await Promise.resolve();
-  return result;
+
+  try {
+    const deadline = performance.now() + options.timeoutMs;
+    let operations = 0;
+    for (const record of records) {
+      if (operations >= options.maxOperations || performance.now() >= deadline) break;
+      const element = record.element;
+      if (
+        !(element instanceof HTMLDetailsElement) ||
+        element.hasAttribute("disabled") ||
+        element.open ||
+        detailsDepth(element) >= options.maxDepth
+      ) {
+        continue;
+      }
+      operations++;
+      opened.push({ element, wasOpen: false });
+      exploration.details.add(element);
+      element.open = true;
+      await yieldToEventLoop();
+    }
+    return { exploration, restore };
+  } catch (error) {
+    restore();
+    throw error;
+  }
 }
 
 function explorationEvidence(
@@ -680,57 +717,72 @@ function disambiguateInteractions(interactions: Interaction[]): void {
 export async function extract(options?: ExtractionOptions): Promise<Batch> {
   const normalized = normalizeOptions(options);
   let records = traverse(document);
-  const exploration = await exploreSafely(records, normalized);
-  if (exploration.details.size > 0) records = traverse(document);
+  const { exploration, restore } = await exploreSafely(records, normalized);
+  try {
+    if (exploration.details.size > 0) records = traverse(document);
 
-  // Forms claim their controls first (GV-007). A control owned by a form is a
-  // parameter of that form's tool and is not also emitted as a standalone tool:
-  // two tools that fill the same field give an agent no basis for choosing
-  // between them. Submit buttons are deliberately not claimed -- they are
-  // actions rather than parameters, and the form tool requires every required
-  // parameter, so dropping them would remove the ability to just click submit.
-  const formMemberIndex = new Map<HTMLFormElement, ElementRecord[]>();
-  const claimed = new Set<Element>();
-  for (const record of records) {
-    if (record.hidden || !(record.element instanceof HTMLFormElement)) continue;
-    const members = read<ElementRecord[]>([], () => formMembers(record.element as HTMLFormElement, records));
-    formMemberIndex.set(record.element, members);
-    for (const member of members) {
-      if (isControl(member.element)) claimed.add(member.element);
-    }
-  }
-
-  const interactions: Interaction[] = [];
-  for (const record of records) {
-    if (record.hidden) continue;
-    const element = record.element;
-    try {
-      // The branches are exclusive: one record must not yield two interactions.
-      if (element instanceof HTMLFormElement) {
-        interactions.push(formInteraction(record, formMemberIndex.get(element) ?? []));
-      } else if (claimed.has(element)) {
-        // Already a parameter of its form's tool.
-      } else if (isControl(element)) {
-        const interaction = controlInteraction(record);
-        explorationEvidence(interaction, element, exploration);
-        interactions.push(interaction);
-      } else if (isAction(element)) {
-        const interaction = actionInteraction(record);
-        explorationEvidence(interaction, element, exploration);
-        interactions.push(interaction);
+    // Forms claim their controls first (GV-007). A control owned by a form is a
+    // parameter of that form's tool and is not also emitted as a standalone tool:
+    // two tools that fill the same field give an agent no basis for choosing
+    // between them. Submit buttons are deliberately not claimed -- they are
+    // actions rather than parameters, and the form tool requires every required
+    // parameter, so dropping them would remove the ability to just click submit.
+    const formMemberIndex = new Map<HTMLFormElement, ElementRecord[]>();
+    const claimed = new Set<Element>();
+    for (const record of records) {
+      if (record.hidden || !(record.element instanceof HTMLFormElement)) continue;
+      const members = read<ElementRecord[]>([], () => formMembers(record.element as HTMLFormElement, records));
+      formMemberIndex.set(record.element, members);
+      for (const member of members) {
+        if (isControl(member.element)) claimed.add(member.element);
       }
-    } catch {
-      // Element-level failures are intentionally isolated so the remaining
-      // deterministic observations are still returned.
     }
-  }
-  disambiguateInteractions(interactions);
 
-  return {
-    coverageReported: false,
-    frames: [],
-    interactions,
-  };
+    const interactions: Interaction[] = [];
+    let elementFailures = 0;
+    for (const record of records) {
+      if (record.hidden) continue;
+      const element = record.element;
+      try {
+        // The branches are exclusive: one record must not yield two interactions.
+        if (element instanceof HTMLFormElement) {
+          interactions.push(formInteraction(record, formMemberIndex.get(element) ?? []));
+        } else if (claimed.has(element)) {
+          // Already a parameter of its form's tool.
+        } else if (isControl(element)) {
+          const interaction = controlInteraction(record);
+          explorationEvidence(interaction, element, exploration);
+          interactions.push(interaction);
+        } else if (isAction(element)) {
+          const interaction = actionInteraction(record);
+          explorationEvidence(interaction, element, exploration);
+          interactions.push(interaction);
+        }
+      } catch {
+        // Isolate the failure so the remaining observations are still returned,
+        // and count it so the gap is explicit (GV-030).
+        elementFailures++;
+      }
+    }
+    disambiguateInteractions(interactions);
+
+    const warnings: Warning[] = [];
+    if (elementFailures > 0) {
+      warnings.push({
+        code: "element_extraction_failed",
+        message: `${elementFailures} element(s) could not be extracted`,
+      });
+    }
+
+    return {
+      coverageReported: false,
+      frames: [],
+      interactions,
+      warnings,
+    };
+  } finally {
+    restore();
+  }
 }
 
 globalThis.__GEOVISOR_EXTRACT__ = extract;

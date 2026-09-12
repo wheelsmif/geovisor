@@ -18,10 +18,20 @@ WebMCP, MCP, or OpenAI tool formats.
 ## Safety
 
 - Safe exploration may inspect and interact only when an action is classified
-  safe; it must never navigate or submit.
+  safe; it must never navigate or submit. Bindings classified `unknown` cannot
+  be marked safe to explore.
+- When enabled, safe exploration may open `<details>` elements, yields so
+  reveal handlers can run, and restores each element's prior `open` state
+  before returning. `--depth 0` performs no exploration.
+- Observation-side JavaScript runs in an isolated world, not the page's main
+  world.
+- Attach mode attaches debugger sessions only to the selected target and its
+  descendant frames. `--target active` requires a single top-level HTTP(S)
+  page or an explicit `id:` / `url:` selector.
 - Stealth behavior is disabled unless explicitly requested.
 - Missing or inaccessible frames produce `partial` coverage plus explicit
-  uncovered-frame records.
+  uncovered-frame records. Closed shadow roots and suppressed element-level
+  extraction failures are reported as warnings.
 
 ## TIR contract
 

@@ -313,7 +313,7 @@
         {
           "if": {
             "properties": {
-              "class": { "enum": ["navigation", "submission"] }
+              "class": { "enum": ["navigation", "submission", "unknown"] }
             },
             "required": ["class"]
           },

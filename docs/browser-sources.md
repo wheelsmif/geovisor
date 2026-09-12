@@ -6,13 +6,18 @@
   validated HTTP(S) URL, observes the page, and closes the browser and process
   resources it created.
 - Attach connects to an existing CDP endpoint and selects a top-level target by
-  focused fallback, exact target ID, or exact URL. It navigates only when the
-  caller supplies `RequestedURL`, disconnects its own CDP transport, and never
-  closes or kills the existing browser or selected target.
+  exact target ID, exact URL, or the sole top-level HTTP(S) page. If more than
+  one such page is open, attach fails unless the caller names the target. It
+  never attaches a debugger session to another tab to probe focus. Sessions
+  attach only to the selected target and its descendant frames. It navigates
+  only when the caller supplies `RequestedURL`, disconnects its own CDP
+  transport, and never closes or kills the existing browser or selected target.
 
 Both adapters return one coverage-reporting observation batch in stable frame
 tree order. Inaccessible frame contexts remain explicit uncovered facts rather
-than disappearing from the result.
+than disappearing from the result. Readiness probes and extraction run in an
+isolated world so the page cannot observe that JavaScript. Closed shadow roots
+discovered by CDP pierce are reported as batch warnings.
 
 ## Launch process policy
 

@@ -208,7 +208,7 @@ func TestAnnotationDerivationForEverySideEffect(t *testing.T) {
 			web := deriveWebMCPAnnotations(actions)
 			if web.ReadOnlyHint != test.readOnly ||
 				web.ConsequentialHint != test.consequential ||
-				web.UntrustedContentHint {
+				!web.UntrustedContentHint {
 				t.Fatalf("WebMCP annotations = %#v", web)
 			}
 		})

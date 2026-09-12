@@ -41,6 +41,7 @@ Human-readable help, version output, and diagnostics use standard error.
 Canonical DTOs use ordered slices instead of maps. `NewDocument` and
 `Document.Normalize` ensure non-null collections. `Document.Validate` enforces
 invariants that JSON Schema cannot represent, including explicit partial frame
-coverage and the prohibition on safe exploration of navigation or submission.
+coverage and the prohibition on safe exploration of navigation, submission,
+or unknown.
 
 See `docs/adr` for the decisions that establish these boundaries.

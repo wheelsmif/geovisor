@@ -117,7 +117,7 @@ func deriveWebMCPAnnotations(actions []tir.ActionBinding) webMCPAnnotations {
 	return webMCPAnnotations{
 		ReadOnlyHint:         readOnly,
 		ConsequentialHint:    consequential,
-		UntrustedContentHint: false,
+		UntrustedContentHint: true,
 	}
 }
 

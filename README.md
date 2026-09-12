@@ -102,9 +102,10 @@ geovisor inspect --cdp http://127.0.0.1:9222 --target active \
   --navigate https://example.com
 ```
 
-Targets are `active`, `id:<id>`, or `url:<exact-http(s)-url>`. Attach mode
-disconnects only GEO-Visor's CDP transport; it does not close the existing
-browser or target.
+Targets are `active`, `id:<id>`, or `url:<exact-http(s)-url>`. `--target active`
+selects the only top-level HTTP(S) page; if more than one is open, pass `id:`
+or `url:` so attach never touches another tab. Attach mode disconnects only
+GEO-Visor's CDP transport; it does not close the existing browser or target.
 
 ## Safety and runtime controls
 
@@ -133,10 +134,14 @@ Page URLs remain source metadata, so callers should avoid sensitive query
 parameters in requested URLs and treat artifacts as potentially sensitive
 site-structure data.
 
-Safe exploration is off by default. When enabled it only opens `<details>`
-elements by setting local DOM state; it does not click, submit, fetch, or
-navigate. Stealth behavior is separately opt-in. Cross-origin frame gaps and
-access interstitials are surfaced as diagnostics rather than hidden.
+Safe exploration is off by default. When enabled it may open `<details>`
+elements by setting local DOM state, yields so reveal handlers can run, and
+restores each element's prior `open` state before returning. `--depth 0`
+performs no exploration. It does not click, submit, fetch, or navigate.
+Stealth behavior is separately opt-in. Cross-origin frame gaps, closed shadow
+roots, suppressed element-level extraction failures, and access interstitials
+are surfaced as diagnostics or warnings rather than hidden. Page-derived tool
+names and descriptions are marked untrusted in WebMCP output.
 
 GEO-Visor-owned Chromium launches explicitly disable go-rod's leakless helper
 at runtime. Some antivirus products flag that helper; its module may still

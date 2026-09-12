@@ -5,7 +5,7 @@ Plan of record for the 48 findings in
 during remediation. Finding IDs are stable and are never renumbered; this
 document tracks each `GV-NNN` to a phase, a task, and an exit condition.
 
-Status: **Phases 1 and 2 complete.** Every finding was re-confirmed against the
+Status: **Phases 1, 2, and 3 complete.** Every finding was re-confirmed against the
 working tree before this plan was written.
 
 ## Findings added during remediation
@@ -562,6 +562,14 @@ Per decision 3, fix both together:
 handler yields the revealed controls; both budgets are demonstrably enforced;
 page state after extraction is byte-identical to before.
 
+**Done.** `exploreSafely` snapshots `open`, opens only closed eligible
+`<details>`, yields with `setTimeout(0)` so `toggle` handlers run, then
+`extract` restores in a `finally`. `--depth 0` is an early return; the depth
+guard is `detailsDepth < maxDepth`. Tests distinguish depth, operations, and
+a zero time budget, and assert `outerHTML` restoration on a non-mutating
+page. Page scripts that insert nodes during `toggle` keep those nodes; we
+restore only the `open` attribute we changed.
+
 ### 3.2 GV-010 — `--depth 0` means no exploration (S3)
 
 `detailsDepth` of a top-level `<details>` is `0`, and the guard is
@@ -572,6 +580,9 @@ stops it and the depth cap is never exercised.
 
 **Acceptance:** `--depth 0` performs zero operations, and a test distinguishes
 the depth cap from the operations cap.
+
+**Done.** Depth 0 returns before any open. Depth 1 opens top-level only;
+`maxOperations: 1` with a deeper cap opens only the first eligible element.
 
 ### 3.3 GV-011 — Attach mode stays inside the selected target (S2)
 
@@ -586,6 +597,12 @@ and the tool may observe a page the user never selected.
 frames. The no-focus fallback either fails explicitly or emits a `Diagnostic`
 naming the target it chose.
 
+**Done.** `chooseTarget` no longer attaches to probe `document.hasFocus()`.
+`--target active` succeeds only when there is exactly one top-level HTTP(S)
+page; otherwise it fails and asks for `id:` or `url:`.
+`attachOOPIFSessions` attaches only iframe targets whose frame ID appears in
+the selected page's tree, repeating as nested OOPIFs become known.
+
 ### 3.4 GV-012 — Probes leave the page's main world (S2)
 
 `waitForDocumentReady`, `waitForDOMQuiet`, and `targetHasFocus` all call
@@ -597,6 +614,10 @@ which undercuts both the stealth story and determinism.
 
 **Acceptance:** No observation-side JavaScript evaluates in the page's main
 world.
+
+**Done.** `waitForDocumentReady` and `waitForDOMQuiet` create the same isolated
+world `extractFrame` already used. `targetHasFocus` is gone with the focus
+probe.
 
 ### 3.5 GV-013 — Mark page-derived text as untrusted (S2)
 
@@ -615,6 +636,10 @@ binding with class `unknown` may still assert it is safe to explore. Given the
 guardrail that safe exploration must never navigate or submit, `unknown` should
 not be assertable as safe; make that explicit in validation.
 
+**Done.** `UntrustedContentHint` is true on every WebMCP tool. `unknown` joins
+navigation and submission in `tir.Validate` and the JSON Schema. Documented in
+`SECURITY.md`.
+
 ### 3.6 GV-030 + GV-031 — Element-level gaps become explicit (S2/S3)
 
 `read`'s `catch` and `extract`'s bare `catch {}` discard every element-level
@@ -627,13 +652,19 @@ way, with no equivalent of the uncovered-frame record.
 batch and reach the TIR `warnings` collection. Closed shadow roots produce a
 coverage record.
 
+**Done.** The extractor counts `extract` loop failures as
+`element_extraction_failed`. Closed shadows are invisible to page JS, so the
+browser source walks the pierced CDP tree and emits `closed_shadow_root`
+warnings (user-agent shadows are ignored). The compiler copies batch warnings
+into TIR.
+
 ### 3.7 Documentation
 
 `docs/product-spec.md` and `README.md` state the guarantee that is actually
 held, in matching language, in the same commits as the behavior above.
 
-**Phase exit:** GV-008 through GV-013, GV-030, GV-031 closed. Safety claims in
-the docs are true statements about the code.
+**Phase exit — met.** GV-008 through GV-013, GV-030, GV-031 closed. Safety
+claims in the docs are true statements about the code.
 
 ---
 
