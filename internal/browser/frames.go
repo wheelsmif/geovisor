@@ -31,6 +31,7 @@ type observeTargetOptions struct {
 	navigate       bool
 	quietPeriod    time.Duration
 	quietTimeout   time.Duration
+	frameTimeout   time.Duration
 	extraction     ExtractionOptions
 	sourceKind     observation.SourceKind
 	stealthEnabled bool
@@ -103,7 +104,7 @@ func observeTarget(
 			URL:        frame.frame.URL,
 			Origin:     frame.frame.SecurityOrigin,
 		}
-		extracted, code, reason := extractFrame(frame, options.extraction)
+		extracted, code, reason := extractFrame(frame, options.extraction, options.frameTimeout)
 		if reason != "" {
 			fact.Accessible = false
 			fact.Reason = reason
@@ -521,10 +522,10 @@ func stableUniqueFrameIDs(source []proto.PageFrameID) []proto.PageFrameID {
 func extractFrame(
 	frame discoveredFrame,
 	options ExtractionOptions,
+	frameTimeout time.Duration,
 ) (observation.Batch, DiagnosticCode, string) {
-	frameTimeout := 3 * time.Second
-	if configured := time.Duration(options.TimeoutMS)*time.Millisecond + 2*time.Second; configured > frameTimeout {
-		frameTimeout = configured
+	if frameTimeout <= 0 {
+		frameTimeout = defaultFrameTimeout(explorationBudget(options.TimeoutMS))
 	}
 	ctx, cancel := context.WithTimeout(frame.session.ctx, frameTimeout)
 	defer cancel()
@@ -564,8 +565,7 @@ func extractFrame(
 		AwaitPromise: true, ReturnByValue: true,
 	}).Call(&session)
 	if err != nil {
-		return observation.Batch{}, DiagnosticFrameUncovered,
-			"browser lost the frame context during extraction"
+		return observation.Batch{}, DiagnosticFrameUncovered, extractionEvaluateReason(ctx, err)
 	}
 	if extracted.ExceptionDetails != nil || extracted.Result == nil {
 		return observation.Batch{}, DiagnosticFrameUncovered,
@@ -578,6 +578,20 @@ func extractFrame(
 	}
 	batch.Warnings = append(batch.Warnings, closedShadowWarnings(&session, frame.frame.ID)...)
 	return batch, "", ""
+}
+
+func extractionEvaluateReason(ctx context.Context, err error) string {
+	if isExtractionTimeout(ctx, err) {
+		return "extraction exceeded the frame timeout"
+	}
+	return "browser lost the frame context during extraction"
+}
+
+func isExtractionTimeout(ctx context.Context, err error) bool {
+	if ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	return err != nil && errors.Is(err, context.DeadlineExceeded)
 }
 
 func decodeBatchStrict(data []byte) (observation.Batch, error) {

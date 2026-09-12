@@ -28,6 +28,8 @@ const DEFAULT_TIMEOUT_MS = 1_000;
 const MAX_DEPTH = 16;
 const MAX_OPERATIONS = 500;
 const MAX_TIMEOUT_MS = 10_000;
+/** Per-call @medv/finder budget. Exhaustion falls back to simpleSelector (GV-033). */
+const FINDER_TIMEOUT_MS = 50;
 
 const CUSTOM_CONTROL_ROLES = new Set([
   "checkbox",
@@ -185,22 +187,23 @@ function simpleSelector(element: Element): string {
 }
 
 function cssFallback(element: Element): string {
+  const fallback = simpleSelector(element);
   const root = element.getRootNode();
-  if (root instanceof Document) {
-    return read(simpleSelector(element), () =>
-      finder(element, {
-        attr: (name) => name === "role" || name === "type",
-        className: () => false,
-        idName: () => false,
-        tagName: () => true,
-        timeoutMs: Number.MAX_SAFE_INTEGER,
-        seedMinLength: 1,
-        optimizedMinLength: 2,
-        maxNumberOfPathChecks: 5_000,
-      }),
-    );
+  if (root.nodeType !== 9) {
+    return fallback;
   }
-  return simpleSelector(element);
+  return read(fallback, () =>
+    finder(element, {
+      attr: (name) => name === "role" || name === "type",
+      className: () => false,
+      idName: () => false,
+      tagName: () => true,
+      timeoutMs: FINDER_TIMEOUT_MS,
+      seedMinLength: 1,
+      optimizedMinLength: 2,
+      maxNumberOfPathChecks: 5_000,
+    }),
+  );
 }
 
 function pathNode(element: Element, sourceOrder: number): PathNode {

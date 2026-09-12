@@ -452,7 +452,7 @@ func runRoundTripBatches(
 	node := requireNodeForRoundTrip(t)
 	declareRoundTripInputs(t, root, fixture)
 
-	document, err := compiler.Compile(compiler.Input{
+	document, err := compiler.Compile(context.Background(), compiler.Input{
 		Source: observation.Source{
 			Kind:         observation.SourceLaunchURL,
 			RequestedURL: "https://roundtrip.example/",

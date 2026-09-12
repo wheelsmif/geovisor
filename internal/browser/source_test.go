@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-rod/rod/lib/launcher/flags"
 	"github.com/go-rod/rod/lib/proto"
@@ -124,13 +125,66 @@ func TestSanitizedErrorRedactsEndpointSecrets(t *testing.T) {
 		endpoint,
 	)
 	rendered := err.Error() + " " + err.Unwrap().Error()
-	for _, forbidden := range []string{"will", "password", "token", "secret"} {
+	for _, forbidden := range []string{"will", "password", "secret"} {
 		if strings.Contains(rendered, forbidden) {
 			t.Fatalf("sanitized error leaked %q: %s", forbidden, rendered)
 		}
 	}
+	if !strings.Contains(rendered, "token") {
+		t.Fatalf("sanitized error redacted the query key: %s", rendered)
+	}
 	if !strings.Contains(rendered, "redacted") {
 		t.Fatalf("sanitized error has no redaction marker: %s", rendered)
+	}
+}
+
+func TestSanitizeTextIgnoresQueryKeys(t *testing.T) {
+	t.Parallel()
+	endpoint := "http://localhost:9222/?a=1&user=bob"
+	message := "cannot attach to target: a page was already claimed by another agent"
+	if got := sanitizeText(message, endpoint); got != message {
+		t.Fatalf("sanitizeText altered an unrelated message:\n got %q\nwant %q", got, message)
+	}
+	leaky := "cannot attach as user bob"
+	if got := sanitizeText(leaky, endpoint); strings.Contains(got, "bob") {
+		t.Fatalf("sanitizeText leaked query value: %s", got)
+	}
+	if !strings.Contains(sanitizeText(leaky, endpoint), "user") {
+		t.Fatal("sanitizeText redacted the query key")
+	}
+}
+
+func TestFrameTimeoutDefaultsProportionately(t *testing.T) {
+	t.Parallel()
+	options := LaunchOptions{URL: "https://example.test/"}
+	if err := validateLaunchOptions(&options); err != nil {
+		t.Fatalf("validate launch options: %v", err)
+	}
+	want := defaultExplorationBudget + defaultSelectorAllowance + defaultFrameOverhead
+	if options.FrameTimeout != want {
+		t.Fatalf("default FrameTimeout = %s, want %s", options.FrameTimeout, want)
+	}
+
+	options = LaunchOptions{
+		URL:          "https://example.test/",
+		Extraction:   ExtractionOptions{TimeoutMS: 4000},
+		FrameTimeout: 0,
+	}
+	if err := validateLaunchOptions(&options); err != nil {
+		t.Fatalf("validate launch options with exploration: %v", err)
+	}
+	want = 4*time.Second + defaultSelectorAllowance + defaultFrameOverhead
+	if options.FrameTimeout != want {
+		t.Fatalf("proportionate FrameTimeout = %s, want %s", options.FrameTimeout, want)
+	}
+
+	options = LaunchOptions{
+		URL:          "https://example.test/",
+		Extraction:   ExtractionOptions{TimeoutMS: 4000},
+		FrameTimeout: time.Second,
+	}
+	if err := validateLaunchOptions(&options); err == nil {
+		t.Fatal("frame timeout below exploration unexpectedly accepted")
 	}
 }
 

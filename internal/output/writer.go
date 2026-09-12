@@ -1,7 +1,10 @@
-// Package output writes generated artifacts without exposing partial files.
+// Package output writes generated artifacts without exposing a mixed set of
+// old and new files. Each file is replaced atomically; if any replace fails,
+// already-replaced files in the same call are rolled back.
 package output
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -26,26 +29,79 @@ type stagedFile struct {
 	temp   string
 }
 
-// WriteFiles atomically replaces each file after every artifact has been
-// staged successfully. Callers must finish all generation before calling it.
-func WriteFiles(files []File) error {
+type replacement struct {
+	target   string
+	backup   string
+	replaced bool
+}
+
+type fileOps struct {
+	mkdirAll func(path string, perm os.FileMode) error
+	chmod    func(name string, mode os.FileMode) error
+	replace  func(source, destination string) error
+	syncDir  func(path string) error
+}
+
+func productionOps() fileOps {
+	return fileOps{
+		mkdirAll: os.MkdirAll,
+		chmod:    os.Chmod,
+		replace:  replaceFile,
+		syncDir:  syncDirectory,
+	}
+}
+
+// WriteFiles stages every artifact, then replaces each destination. A failure
+// during replace or chmod restores any destination this call already replaced.
+// Parent directories are synced after a successful replace so a crash cannot
+// lose the directory entry. Callers must finish all generation before calling.
+func WriteFiles(ctx context.Context, files []File) error {
+	return writeFiles(ctx, files, productionOps())
+}
+
+func writeFiles(ctx context.Context, files []File, ops fileOps) error {
+	if ctx == nil {
+		return errors.New("output context must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("write files: %w", err)
+	}
 	if err := validateFiles(files); err != nil {
 		return err
 	}
 
 	staged := make([]stagedFile, 0, len(files))
+	replacements := make([]replacement, 0, len(files))
+	committed := false
 	cleanup := func() {
+		if committed {
+			return
+		}
 		for _, file := range staged {
 			if file.temp != "" {
 				_ = os.Remove(file.temp)
+			}
+		}
+		for _, item := range replacements {
+			if item.replaced {
+				if item.backup != "" {
+					_ = ops.replace(item.backup, item.target)
+				} else {
+					_ = os.Remove(item.target)
+				}
+			} else if item.backup != "" {
+				_ = os.Remove(item.backup)
 			}
 		}
 	}
 	defer cleanup()
 
 	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("write files: %w", err)
+		}
 		parent := filepath.Dir(file.Path)
-		if err := os.MkdirAll(parent, directoryPermission); err != nil {
+		if err := ops.mkdirAll(parent, directoryPermission); err != nil {
 			return fmt.Errorf("create output directory %q: %w", parent, err)
 		}
 		temp, err := stageFile(parent, filepath.Base(file.Path), file.Data)
@@ -55,13 +111,55 @@ func WriteFiles(files []File) error {
 		staged = append(staged, stagedFile{target: file.Path, temp: temp})
 	}
 
+	parents := make([]string, 0, len(staged))
+	seenParent := make(map[string]struct{}, len(staged))
 	for index := range staged {
-		if err := replaceFile(staged[index].temp, staged[index].target); err != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("write files: %w", err)
+		}
+		item := replacement{target: staged[index].target}
+		info, statErr := os.Stat(staged[index].target)
+		switch {
+		case statErr == nil && !info.IsDir():
+			backup, err := backupExisting(staged[index].target)
+			if err != nil {
+				return fmt.Errorf("backup output %q: %w", staged[index].target, err)
+			}
+			item.backup = backup
+		case statErr == nil:
+			// Destination exists as a directory; replace will fail and rollback
+			// earlier files. Do not treat it as a file backup.
+		case os.IsNotExist(statErr):
+		default:
+			return fmt.Errorf("stat output %q: %w", staged[index].target, statErr)
+		}
+		if err := ops.replace(staged[index].temp, staged[index].target); err != nil {
+			replacements = append(replacements, item)
 			return fmt.Errorf("replace output %q: %w", staged[index].target, err)
 		}
 		staged[index].temp = ""
-		if err := os.Chmod(staged[index].target, filePermission); err != nil {
-			return fmt.Errorf("secure output permissions %q: %w", staged[index].target, err)
+		item.replaced = true
+		replacements = append(replacements, item)
+		if err := ops.chmod(item.target, filePermission); err != nil {
+			return fmt.Errorf("secure output permissions %q: %w", item.target, err)
+		}
+		parent := filepath.Dir(item.target)
+		if _, seen := seenParent[parent]; !seen {
+			seenParent[parent] = struct{}{}
+			parents = append(parents, parent)
+		}
+	}
+
+	for _, item := range replacements {
+		if item.backup != "" {
+			_ = os.Remove(item.backup)
+		}
+	}
+	replacements = replacements[:0]
+	committed = true
+	for _, parent := range parents {
+		if err := ops.syncDir(parent); err != nil {
+			return fmt.Errorf("sync output directory %q: %w", parent, err)
 		}
 	}
 	return nil
@@ -87,6 +185,14 @@ func validateFiles(files []File) error {
 		seen[key] = file.Path
 	}
 	return nil
+}
+
+func backupExisting(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return stageFile(filepath.Dir(path), filepath.Base(path)+".prev", data)
 }
 
 func stageFile(directory, base string, data []byte) (path string, returnedError error) {

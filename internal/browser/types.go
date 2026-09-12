@@ -12,9 +12,12 @@ import (
 )
 
 const (
-	defaultTimeout       = 30 * time.Second
-	defaultDOMQuiet      = 250 * time.Millisecond
-	defaultDOMQuietLimit = 2 * time.Second
+	defaultTimeout           = 30 * time.Second
+	defaultDOMQuiet          = 250 * time.Millisecond
+	defaultDOMQuietLimit     = 2 * time.Second
+	defaultSelectorAllowance = 2 * time.Second
+	defaultFrameOverhead     = 2 * time.Second
+	defaultExplorationBudget = time.Second
 )
 
 // BrowserSource is the small boundary shared by launch and attach sources.
@@ -107,6 +110,7 @@ type LaunchOptions struct {
 	Timeout         time.Duration
 	DOMQuietPeriod  time.Duration
 	DOMQuietTimeout time.Duration
+	FrameTimeout    time.Duration
 	Stealth         bool
 	Extraction      ExtractionOptions
 }
@@ -120,6 +124,7 @@ type AttachOptions struct {
 	Timeout         time.Duration
 	DOMQuietPeriod  time.Duration
 	DOMQuietTimeout time.Duration
+	FrameTimeout    time.Duration
 	Extraction      ExtractionOptions
 }
 

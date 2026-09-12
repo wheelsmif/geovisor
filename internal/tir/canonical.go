@@ -7,10 +7,9 @@ import (
 	"sort"
 )
 
-// Marshal returns compact canonical JSON without a trailing newline. It clones,
-// normalizes, orders, and validates the document, leaving caller-owned data
-// unchanged.
-func Marshal(document *Document) ([]byte, error) {
+// Canonical returns a cloned, normalized, ordered, and validated document
+// without marshaling. Caller-owned data is left unchanged.
+func Canonical(document *Document) (*Document, error) {
 	cloned := Clone(document)
 	if cloned == nil {
 		return nil, invalid("", "nil_document", "document must not be nil")
@@ -18,6 +17,17 @@ func Marshal(document *Document) ([]byte, error) {
 	cloned.Normalize()
 	canonicalize(cloned)
 	if err := cloned.Validate(); err != nil {
+		return nil, err
+	}
+	return cloned, nil
+}
+
+// Marshal returns compact canonical JSON without a trailing newline. It clones,
+// normalizes, orders, and validates the document, leaving caller-owned data
+// unchanged.
+func Marshal(document *Document) ([]byte, error) {
+	cloned, err := Canonical(document)
+	if err != nil {
 		return nil, err
 	}
 	data, err := json.Marshal(cloned)

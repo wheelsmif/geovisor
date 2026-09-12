@@ -1,6 +1,8 @@
 package browser
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -422,6 +424,27 @@ func TestCollectClosedShadowsRecordsAuthorClosedRoots(t *testing.T) {
 	childWarnings := collectClosedShadows(nested, "child")
 	if len(childWarnings) != 1 || childWarnings[0].Message != "closed shadow root on host" {
 		t.Fatalf("child-frame shadows = %+v", childWarnings)
+	}
+}
+
+func TestExtractionEvaluateReasonDistinguishesTimeout(t *testing.T) {
+	t.Parallel()
+
+	timedOut, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-timedOut.Done()
+	if got := extractionEvaluateReason(timedOut, errors.New("cdp evaluate failed")); got !=
+		"extraction exceeded the frame timeout" {
+		t.Fatalf("timeout reason = %q", got)
+	}
+
+	lost := extractionEvaluateReason(context.Background(), errors.New("session closed"))
+	if lost != "browser lost the frame context during extraction" {
+		t.Fatalf("context-loss reason = %q", lost)
+	}
+	if extractionEvaluateReason(context.Background(), context.DeadlineExceeded) !=
+		"extraction exceeded the frame timeout" {
+		t.Fatal("wrapped deadline was not reported as a timeout")
 	}
 }
 

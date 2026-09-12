@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"math/rand"
@@ -16,7 +17,7 @@ import (
 func TestCompileAggregatesDeterministically(t *testing.T) {
 	t.Parallel()
 
-	document, err := Compile(fixtureInput())
+	document, err := Compile(context.Background(), fixtureInput())
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestCompileCopiesObservationWarnings(t *testing.T) {
 		Code:    observation.WarningElementExtractionFailed,
 		Message: "2 element(s) could not be extracted",
 	}}
-	document, err := Compile(input)
+	document, err := Compile(context.Background(), input)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestCompileDoesNotCollapseDistinctScopes(t *testing.T) {
 	t.Parallel()
 
 	input := fixtureInput()
-	document, err := Compile(input)
+	document, err := Compile(context.Background(), input)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestCompileRejectsInvalidRawReferences(t *testing.T) {
 			t.Parallel()
 			input := fixtureInput()
 			test.mutate(&input)
-			_, err := Compile(input)
+			_, err := Compile(context.Background(), input)
 			var compilerError *Error
 			if !errors.As(err, &compilerError) || compilerError.Code != test.code {
 				t.Fatalf("error = %T %v, want compiler error %q", err, err, test.code)
@@ -202,7 +203,7 @@ func TestCompileRepeatedShuffleIsByteIdentical(t *testing.T) {
 	t.Parallel()
 
 	input := fixtureInput()
-	baselineDocument, err := Compile(input)
+	baselineDocument, err := Compile(context.Background(), input)
 	if err != nil {
 		t.Fatalf("compile baseline: %v", err)
 	}
@@ -215,7 +216,7 @@ func TestCompileRepeatedShuffleIsByteIdentical(t *testing.T) {
 	for iteration := 0; iteration < 100; iteration++ {
 		shuffled := cloneInput(input)
 		shuffleInput(random, &shuffled)
-		document, err := Compile(shuffled)
+		document, err := Compile(context.Background(), shuffled)
 		if err != nil {
 			t.Fatalf("iteration %d compile: %v", iteration, err)
 		}
@@ -260,7 +261,7 @@ func TestCompileIDsStableWhenUnrelatedInteractionInserted(t *testing.T) {
 		Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:button", Score: 0.6}},
 	}
 
-	baseline, err := Compile(Input{
+	baseline, err := Compile(context.Background(), Input{
 		Source:  observation.Source{Kind: observation.SourceLaunchURL},
 		Batches: []observation.Batch{{Interactions: []observation.Interaction{unnamed}}},
 	})
@@ -271,7 +272,7 @@ func TestCompileIDsStableWhenUnrelatedInteractionInserted(t *testing.T) {
 		t.Fatalf("baseline tools = %d, want 1", len(baseline.Tools))
 	}
 
-	shifted, err := Compile(Input{
+	shifted, err := Compile(context.Background(), Input{
 		Source:  observation.Source{Kind: observation.SourceLaunchURL},
 		Batches: []observation.Batch{{Interactions: []observation.Interaction{unrelated, unnamed}}},
 	})
@@ -290,7 +291,7 @@ func TestCompileIDsStableWhenUnrelatedInteractionInserted(t *testing.T) {
 func TestCompileGolden(t *testing.T) {
 	t.Parallel()
 
-	document, err := Compile(fixtureInput())
+	document, err := Compile(context.Background(), fixtureInput())
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -314,12 +315,23 @@ func TestCompileGolden(t *testing.T) {
 	}
 }
 
+func TestCompileHonorsCanceledContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Compile(ctx, fixtureInput())
+	var compilerError *Error
+	if !errors.As(err, &compilerError) || compilerError.Code != "canceled" {
+		t.Fatalf("error = %T %v, want canceled compiler error", err, err)
+	}
+}
+
 func BenchmarkCompileAndMarshal(b *testing.B) {
 	input := fixtureInput()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		document, err := Compile(input)
+		document, err := Compile(context.Background(), input)
 		if err != nil {
 			b.Fatal(err)
 		}

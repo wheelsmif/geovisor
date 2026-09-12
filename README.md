@@ -117,11 +117,15 @@ geovisor inspect https://example.com --safe-explore \
 ```
 
 Useful launch and readiness controls include `--headful`, `--stealth`,
-`--browser-executable`, `--timeout`, `--dom-quiet`, and
-`--dom-quiet-timeout`. Stealth mode only removes common automation markers; it
-does not promise to bypass bot detection or access controls. Inaccessible
-frames are reported as typed diagnostics on stderr while partial artifacts
-still succeed.
+`--browser-executable`, `--timeout`, `--dom-quiet`,
+`--dom-quiet-timeout`, and `--frame-timeout`. `--frame-timeout` is the
+per-frame extraction deadline; it is independent of `--exploration-timeout` and
+defaults to the exploration budget plus time reserved for selector generation.
+A frame that exceeds that deadline is reported as uncovered because extraction
+timed out, not because the browsing context was lost. Stealth mode only removes
+common automation markers; it does not promise to bypass bot detection or
+access controls. Inaccessible frames are reported as typed diagnostics on
+stderr while partial artifacts still succeed.
 
 ## Privacy and safety model
 

@@ -16,6 +16,16 @@ import (
 
 const maxEndpointResponse = 1 << 20
 
+var errEndpointRedirect = errors.New("CDP endpoint redirected")
+
+func newEndpointClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errEndpointRedirect
+		},
+	}
+}
+
 type browserConnection struct {
 	browser *rod.Browser
 	socket  *cdp.WebSocket
@@ -58,7 +68,7 @@ func resolveControlURL(ctx context.Context, endpoint string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := newEndpointClient().Do(request)
 	if err != nil {
 		return "", err
 	}

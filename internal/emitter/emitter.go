@@ -3,7 +3,6 @@ package emitter
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/wheelsmif/geovisor/internal/tir"
@@ -116,15 +115,11 @@ func canonicalDocument(ctx context.Context, format Format, document *tir.Documen
 	if err := canceled(ctx, format); err != nil {
 		return nil, err
 	}
-	data, err := tir.Marshal(document)
+	canonical, err := tir.Canonical(document)
 	if err != nil {
 		return nil, wrap(format, CodeInvalidDocument, "", err)
 	}
-	var canonical tir.Document
-	if err := json.Unmarshal(data, &canonical); err != nil {
-		return nil, wrap(format, CodeMarshal, "", err)
-	}
-	return &canonical, nil
+	return canonical, nil
 }
 
 func canceled(ctx context.Context, format Format) error {

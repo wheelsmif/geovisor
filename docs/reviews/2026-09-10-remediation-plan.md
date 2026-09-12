@@ -5,7 +5,7 @@ Plan of record for the 48 findings in
 during remediation. Finding IDs are stable and are never renumbered; this
 document tracks each `GV-NNN` to a phase, a task, and an exit condition.
 
-Status: **Phases 1, 2, 3, and 4 complete.** Every finding was re-confirmed against the
+Status: **Phases 1, 2, 3, 4, and 5 complete.** Every finding was re-confirmed against the
 working tree before this plan was written.
 
 ## Findings added during remediation
@@ -794,6 +794,14 @@ budget.
 Extraction timeout is textually distinguishable from context loss, separately
 configurable, and defaulted proportionately to the bounded extraction cost.
 
+**Done.** `cssFallback` gives `@medv/finder` a 50ms per-call budget. `read`
+already degrades to `simpleSelector` when finder throws, including on timeout.
+`--frame-timeout` is a separate Launch/Attach option; when omitted it defaults
+to the exploration budget plus 2s of selector allowance and 2s of
+isolated-world overhead (5s with the 1s exploration default). Exceeding it
+yields "extraction exceeded the frame timeout"; a lost session still yields
+"browser lost the frame context during extraction".
+
 ### 5.2 GV-024 + GV-040 — `WriteFiles` guarantee matches reality (S2/S3)
 
 The doc comment says the package "writes generated artifacts without exposing
@@ -806,6 +814,13 @@ GV-040 is closed alongside: `writer_test.go` covers only staging failure, and
 the replace-phase partial state, `MkdirAll` failure, empty-path rejection,
 `Chmod` failure, and the `replace_windows.go` / `replace_other.go` split are all
 uncovered.
+
+**Done.** The package now keeps the per-file atomic replace and adds
+call-scoped rollback: a replace or chmod failure restores every destination
+this invocation already replaced. Tests cover empty path, nil/canceled
+context, `MkdirAll` failure, mid-loop replace rollback, chmod rollback, and
+`replaceFile` itself. Parent-directory sync is the Unix half of the
+`replace_*.go` split; Windows relies on `MOVEFILE_WRITE_THROUGH`.
 
 ### 5.3 GV-006 — Sanitizer stops shredding diagnostics (S2)
 
@@ -822,6 +837,11 @@ names, and cannot alter text containing no secret. A test asserts an unrelated
 message is byte-identical after sanitization when the endpoint carries a
 single-character query key.
 
+**Done.** Query keys are no longer `ReplaceAll`-ed. Userinfo username and
+password, plus query values, remain redacted. The existing secret test now
+requires the key `token` to survive; `TestSanitizeTextIgnoresQueryKeys` uses
+`?a=1&user=bob` and asserts an unrelated attach diagnostic is unchanged.
+
 ### 5.4 Remaining reliability items
 
 - **GV-025 (S3)** — `file.Sync()` is called but the parent directory is never
@@ -835,7 +855,20 @@ single-character query key.
   document per emitter, four round-trips under `--format all`, with no semantic
   gain over `Clone` + `Normalize`.
 
-**Phase exit:** GV-006, GV-024 through GV-028, GV-033, GV-034, GV-040 closed.
+**Done.**
+- **GV-025** — Unix `syncDirectory` fsyncs the parent after a successful
+  replace set. Windows is a documented no-op because `replaceFile` already
+  requests `MOVEFILE_WRITE_THROUGH`.
+- **GV-026** — `WriteFiles` and `Compile` take `context.Context` first. The CLI
+  threads the inspect context through both. Compile checks between batches.
+- **GV-027** — `resolveControlURL` uses a per-call `http.Client` that refuses
+  redirects. No package-global client.
+- **GV-028** — `tir.Canonical` is the in-memory Clone → Normalize →
+  canonicalize → Validate path `Marshal` already used. Emitters call that
+  instead of marshaling and unmarshaling. `canonicalize` stays in the path
+  because tool order is load-bearing for emitter goldens.
+
+**Phase exit — met.** GV-006, GV-024 through GV-028, GV-033, GV-034, GV-040 closed.
 
 ---
 

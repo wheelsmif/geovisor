@@ -427,6 +427,17 @@ test("reports a warning when an element cannot be extracted", async () => {
   assert.match(batch.warnings[0].message, /1 element/u);
 });
 
+test("records a css fallback and still extracts when many siblings compete", async () => {
+  const buttons = Array.from({ length: 40 }, (_, index) => `<button>Go ${index}</button>`).join("");
+  const dom = page(`<main>${buttons}</main>`);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  const actions = interactions(batch, "action");
+  assert.equal(actions.length, 40);
+  for (const action of actions) {
+    assert.ok(action.locators[0].css, "finder exhaustion must still leave a simpleSelector");
+  }
+});
+
 test("repeated extraction is deterministic", async () => {
   const dom = page(`
     <form aria-label="Search">

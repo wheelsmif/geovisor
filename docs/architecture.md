@@ -21,7 +21,7 @@ The intended flow is:
 - `internal/compiler`: deterministic observation-to-TIR aggregation.
 - `internal/tir`: canonical DTOs, normalization, and cross-field validation.
 - `internal/emitter`: TIR, WebMCP, MCP, OpenAI, and binding artifacts.
-- `internal/output`: staged file replacement.
+- `internal/output`: staged file replacement with all-or-nothing rollback.
 - `internal/version`: development default and release version injection point.
 - `schemas`: language-neutral JSON contract.
 

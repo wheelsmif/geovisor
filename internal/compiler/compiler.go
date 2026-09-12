@@ -3,6 +3,7 @@
 package compiler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -32,6 +33,16 @@ type Error struct {
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s (%s)", e.Field, e.Message, e.Code)
+}
+
+func compileContext(ctx context.Context) error {
+	if ctx == nil {
+		return &Error{Field: "context", Code: "canceled", Message: "context must not be nil"}
+	}
+	if err := ctx.Err(); err != nil {
+		return &Error{Field: "context", Code: "canceled", Message: err.Error()}
+	}
+	return nil
 }
 
 type toolAccumulator struct {
@@ -92,7 +103,10 @@ type compiledTool struct {
 // Compile aggregates all batches without relying on input order. Equivalent
 // evidence is deduplicated, while frame path and semantic scope remain part of
 // interaction identity.
-func Compile(input Input) (*tir.Document, error) {
+func Compile(ctx context.Context, input Input) (*tir.Document, error) {
+	if err := compileContext(ctx); err != nil {
+		return nil, err
+	}
 	if err := validateSourceKind("source.kind", input.Source.Kind); err != nil {
 		return nil, err
 	}
@@ -110,6 +124,9 @@ func Compile(input Input) (*tir.Document, error) {
 	coverageReported := false
 
 	for batchIndex, batch := range input.Batches {
+		if err := compileContext(ctx); err != nil {
+			return nil, err
+		}
 		coverageReported = coverageReported || batch.CoverageReported
 		for frameIndex, frame := range batch.Frames {
 			field := fmt.Sprintf("batches[%d].frames[%d].path", batchIndex, frameIndex)

@@ -85,6 +85,7 @@ func (source *source) observeLaunch(parent context.Context) (Result, error) {
 		navigate:       true,
 		quietPeriod:    source.launch.DOMQuietPeriod,
 		quietTimeout:   source.launch.DOMQuietTimeout,
+		frameTimeout:   source.launch.FrameTimeout,
 		extraction:     source.launch.Extraction,
 		sourceKind:     observation.SourceLaunchURL,
 		stealthEnabled: source.launch.Stealth,
@@ -133,6 +134,7 @@ func (source *source) observeAttach(parent context.Context) (Result, error) {
 		navigate:     source.attach.RequestedURL != "",
 		quietPeriod:  source.attach.DOMQuietPeriod,
 		quietTimeout: source.attach.DOMQuietTimeout,
+		frameTimeout: source.attach.FrameTimeout,
 		extraction:   source.attach.Extraction,
 		sourceKind:   observation.SourceCDPAttach,
 	})

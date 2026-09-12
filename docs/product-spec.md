@@ -31,7 +31,10 @@ WebMCP, MCP, or OpenAI tool formats.
 - Stealth behavior is disabled unless explicitly requested.
 - Missing or inaccessible frames produce `partial` coverage plus explicit
   uncovered-frame records. Closed shadow roots and suppressed element-level
-  extraction failures are reported as warnings.
+  extraction failures are reported as warnings. A frame that exceeds its
+  extraction deadline is uncovered for that reason, not reported as a lost
+  browsing context. `--frame-timeout` is independent of `--exploration-timeout`
+  and defaults to the exploration budget plus a selector-generation allowance.
 
 ## TIR contract
 
@@ -46,7 +49,9 @@ WebMCP, MCP, or OpenAI tool formats.
 - Tool IDs match `^[A-Za-z0-9_-]{1,64}$` so every emitter can use them as
   function names.
 - Locator candidates model frame traversal, shadow traversal, semantic scope,
-  role, accessible name, and an optional CSS fallback.
+  role, accessible name, and an optional CSS fallback. Selector generation is
+  time-bounded and degrades to a simple unique selector when the budget is
+  exhausted.
 - Action bindings carry side-effect classification.
 - Confidence, provenance, and warnings remain structured data.
 - Core artifacts contain no generated timestamps, random IDs, or run-specific
@@ -59,3 +64,10 @@ Producers preserve stable source order, derive any IDs from stable content, call
 collections serialize as arrays, including empty collections. Tool IDs are
 stable across unrelated earlier DOM edits: positional fallback names and CSS
 selectors are not part of identity.
+
+## Artifact writes
+
+`--output` and `--format all` stage every artifact before replacing
+destinations. Each file is replaced atomically; a mid-call replace failure
+restores files this invocation already replaced so a directory is not left
+holding a mix of old and new artifacts.

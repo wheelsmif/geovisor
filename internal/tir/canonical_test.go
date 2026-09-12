@@ -2,6 +2,7 @@ package tir
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
@@ -38,6 +39,37 @@ func TestMarshalCanonicalizesWithoutMutatingCaller(t *testing.T) {
 	}
 	if !bytes.Equal(output.Bytes(), first) {
 		t.Fatal("Write output differs from Marshal")
+	}
+}
+
+func TestCanonicalMatchesMarshalWithoutJSONRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	document := validDocument()
+	document.Tools[0].Parameters[0].Enum = []string{"z", "a", "z"}
+	original := append([]string(nil), document.Tools[0].Parameters[0].Enum...)
+
+	canonical, err := Canonical(document)
+	if err != nil {
+		t.Fatalf("canonical: %v", err)
+	}
+	if !equalStrings(document.Tools[0].Parameters[0].Enum, original) {
+		t.Fatalf("Canonical mutated caller enum: %v", document.Tools[0].Parameters[0].Enum)
+	}
+	if !equalStrings(canonical.Tools[0].Parameters[0].Enum, []string{"a", "z"}) {
+		t.Fatalf("canonical enum = %v, want sorted unique", canonical.Tools[0].Parameters[0].Enum)
+	}
+
+	fromCanonical, err := json.Marshal(canonical)
+	if err != nil {
+		t.Fatalf("marshal canonical: %v", err)
+	}
+	fromMarshal, err := Marshal(document)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Equal(fromCanonical, fromMarshal) {
+		t.Fatal("Canonical plus json.Marshal differs from Marshal")
 	}
 }
 

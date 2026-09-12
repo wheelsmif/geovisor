@@ -41,7 +41,10 @@ only; currently it may open eligible `<details>` elements, yields so `toggle`
 handlers can run, and restores each element's prior `open` state before
 returning. `maxDepth: 0` performs no exploration. It never invokes click,
 submit, navigation, value-changing, or network APIs. Unknown effects remain
-unsafe. `timeoutMs` is a real deadline across that async work.
+unsafe. `timeoutMs` is a real deadline across that async work. CSS fallback
+generation is separately bounded: `@medv/finder` has a short per-call budget
+and degrades to a simple unique selector when that budget is exhausted, so
+selector search cannot consume the frame extraction deadline.
 
 The extractor never reads current control values. Hidden inputs are skipped,
 password fields are represented structurally, and select enums use visible

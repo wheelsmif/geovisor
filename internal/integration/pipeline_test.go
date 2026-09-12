@@ -65,7 +65,7 @@ func TestPayloadCompilerEmitterPipeline(t *testing.T) {
 func TestInaccessibleFrameCorpusCompilesAsPartialCoverage(t *testing.T) {
 	var input compiler.Input
 	decodeFile(t, filepath.Join(repositoryRoot(t), "testdata", "corpus", "inaccessible-observation.json"), &input)
-	document, err := compiler.Compile(input)
+	document, err := compiler.Compile(context.Background(), input)
 	if err != nil {
 		t.Fatalf("compile inaccessible-frame fixture: %v", err)
 	}
@@ -86,7 +86,7 @@ func BenchmarkCorpusCompileAndEmit(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for iteration := 0; iteration < b.N; iteration++ {
-		document, err := compiler.Compile(input)
+		document, err := compiler.Compile(context.Background(), input)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -100,7 +100,7 @@ func BenchmarkCorpusCompileAndEmit(b *testing.B) {
 
 func compileAndEmit(t *testing.T, root string, input compiler.Input) map[emitter.Format]emitter.Result {
 	t.Helper()
-	document, err := compiler.Compile(input)
+	document, err := compiler.Compile(context.Background(), input)
 	if err != nil {
 		t.Fatalf("compile observation: %v", err)
 	}

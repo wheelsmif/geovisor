@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wheelsmif/geovisor/internal/browser"
 	"github.com/wheelsmif/geovisor/internal/compiler"
@@ -90,6 +91,8 @@ func TestInspectRejectsInvalidModesBeforeSourceConstruction(t *testing.T) {
 		{name: "invalid target", args: []string{"inspect", "--cdp", "http://127.0.0.1:9222", "--target", "first"}},
 		{name: "invalid quiet timing", args: []string{"inspect", "https://example.test", "--dom-quiet", "2s", "--dom-quiet-timeout", "1s"}},
 		{name: "invalid depth", args: []string{"inspect", "https://example.test", "--depth", "17"}},
+		{name: "frame timeout below exploration", args: []string{"inspect", "https://example.test", "--exploration-timeout", "2s", "--frame-timeout", "1s"}},
+		{name: "zero frame timeout", args: []string{"inspect", "https://example.test", "--frame-timeout", "0"}},
 	}
 	for _, test := range tests {
 		test := test
@@ -138,8 +141,28 @@ func TestInspectBuildsLaunchAndAttachSources(t *testing.T) {
 		}
 		if !got.Stealth || got.ExecutablePath != "chromium" ||
 			!got.Extraction.SafeExplore || got.Extraction.MaxDepth != 4 ||
-			got.Extraction.MaxOperations != 7 || got.Extraction.TimeoutMS != 1500 {
+			got.Extraction.MaxOperations != 7 || got.Extraction.TimeoutMS != 1500 ||
+			got.FrameTimeout != 0 {
 			t.Fatalf("launch extraction/options = %+v", got)
+		}
+	})
+
+	t.Run("launch with explicit frame timeout", func(t *testing.T) {
+		var got browser.LaunchOptions
+		dependencies := successfulDependencies()
+		dependencies.NewLaunch = func(options browser.LaunchOptions) (browser.BrowserSource, error) {
+			got = options
+			return stubSource{}, nil
+		}
+		err := RunWithDependencies(context.Background(), []string{
+			"inspect", "https://example.test/path",
+			"--exploration-timeout", "1500ms", "--frame-timeout", "8s",
+		}, &bytes.Buffer{}, &bytes.Buffer{}, dependencies)
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if got.FrameTimeout != 8*time.Second || got.Extraction.TimeoutMS != 1500 {
+			t.Fatalf("frame timeout options = %+v", got)
 		}
 	})
 
@@ -379,7 +402,7 @@ func TestEmitterFailureDoesNotWriteAnyAllOutput(t *testing.T) {
 		}}, nil
 	}}
 	writes := 0
-	dependencies.WriteFiles = func([]output.File) error {
+	dependencies.WriteFiles = func(context.Context, []output.File) error {
 		writes++
 		return nil
 	}
@@ -406,7 +429,7 @@ func TestAllOutputRejectsEmitterNameCollisions(t *testing.T) {
 		}}, nil
 	}}
 	writes := 0
-	dependencies.WriteFiles = func([]output.File) error {
+	dependencies.WriteFiles = func(context.Context, []output.File) error {
 		writes++
 		return nil
 	}
@@ -465,7 +488,7 @@ func TestExitCodeMappingAndCancellation(t *testing.T) {
 		{
 			name: "compile", code: ExitCompile,
 			edit: func(dependencies *Dependencies) {
-				dependencies.Compile = func(compiler.Input) (*tir.Document, error) {
+				dependencies.Compile = func(context.Context, compiler.Input) (*tir.Document, error) {
 					return nil, &compiler.Error{Field: "input", Code: "bad", Message: "bad input"}
 				}
 			},
@@ -485,7 +508,7 @@ func TestExitCodeMappingAndCancellation(t *testing.T) {
 		{
 			name: "output", code: ExitOutput, args: []string{"--output", "artifact.json"},
 			edit: func(dependencies *Dependencies) {
-				dependencies.WriteFiles = func([]output.File) error {
+				dependencies.WriteFiles = func(context.Context, []output.File) error {
 					return errors.New("disk full")
 				}
 			},
@@ -531,7 +554,7 @@ func successfulDependencies() Dependencies {
 		NewAttach: func(browser.AttachOptions) (browser.BrowserSource, error) {
 			return stubSource{}, nil
 		},
-		Compile: func(compiler.Input) (*tir.Document, error) {
+		Compile: func(context.Context, compiler.Input) (*tir.Document, error) {
 			return tir.NewDocument(tir.SourceMetadata{
 				Kind: tir.SourceLaunchURL, ExecutionBoundary: tir.ExecutionAgentOwned,
 			}), nil

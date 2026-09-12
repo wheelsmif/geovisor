@@ -13,8 +13,12 @@ func validateLaunchOptions(options *LaunchOptions) error {
 		return configurationError("launch.url", err)
 	}
 	applyTimingDefaults(&options.Timeout, &options.DOMQuietPeriod, &options.DOMQuietTimeout)
+	applyFrameTimeoutDefault(&options.FrameTimeout, options.Extraction.TimeoutMS)
 	if err := validateTimings(options.Timeout, options.DOMQuietPeriod, options.DOMQuietTimeout); err != nil {
 		return configurationError("launch.timing", err)
+	}
+	if err := validateFrameTimeout(options.FrameTimeout, options.Extraction.TimeoutMS); err != nil {
+		return configurationError("launch.frame_timeout", err)
 	}
 	return nil
 }
@@ -32,8 +36,12 @@ func validateAttachOptions(options *AttachOptions) error {
 		return configurationError("attach.selector", err)
 	}
 	applyTimingDefaults(&options.Timeout, &options.DOMQuietPeriod, &options.DOMQuietTimeout)
+	applyFrameTimeoutDefault(&options.FrameTimeout, options.Extraction.TimeoutMS)
 	if err := validateTimings(options.Timeout, options.DOMQuietPeriod, options.DOMQuietTimeout); err != nil {
 		return configurationError("attach.timing", err)
+	}
+	if err := validateFrameTimeout(options.FrameTimeout, options.Extraction.TimeoutMS); err != nil {
+		return configurationError("attach.frame_timeout", err)
 	}
 	return nil
 }
@@ -59,6 +67,36 @@ func validateTimings(timeout, quietPeriod, quietTimeout time.Duration) error {
 	}
 	if quietTimeout < quietPeriod {
 		return errors.New("DOM quiet timeout must be at least the quiet period")
+	}
+	return nil
+}
+
+func applyFrameTimeoutDefault(frameTimeout *time.Duration, explorationMS int) {
+	if *frameTimeout == 0 {
+		*frameTimeout = defaultFrameTimeout(explorationBudget(explorationMS))
+	}
+}
+
+func defaultFrameTimeout(exploration time.Duration) time.Duration {
+	if exploration <= 0 {
+		exploration = defaultExplorationBudget
+	}
+	return exploration + defaultSelectorAllowance + defaultFrameOverhead
+}
+
+func explorationBudget(timeoutMS int) time.Duration {
+	if timeoutMS <= 0 {
+		return defaultExplorationBudget
+	}
+	return time.Duration(timeoutMS) * time.Millisecond
+}
+
+func validateFrameTimeout(frameTimeout time.Duration, explorationMS int) error {
+	if frameTimeout <= 0 {
+		return errors.New("frame timeout must be positive")
+	}
+	if frameTimeout < explorationBudget(explorationMS) {
+		return errors.New("frame timeout must be at least the exploration timeout")
 	}
 	return nil
 }
@@ -154,16 +192,19 @@ func sanitizeText(value string, secrets ...string) string {
 		value = strings.ReplaceAll(value, secret, sanitizeURL(secret))
 		if parsed, err := url.Parse(secret); err == nil {
 			if parsed.User != nil {
+				if username := parsed.User.Username(); username != "" {
+					value = strings.ReplaceAll(value, username, "[redacted]")
+				}
+				if password, set := parsed.User.Password(); set && password != "" {
+					value = strings.ReplaceAll(value, password, "[redacted]")
+				}
 				value = strings.ReplaceAll(value, parsed.User.String(), "[redacted]")
 			}
-			for key, values := range parsed.Query() {
+			for _, values := range parsed.Query() {
 				for _, item := range values {
 					if item != "" {
 						value = strings.ReplaceAll(value, item, "[redacted]")
 					}
-				}
-				if key != "" {
-					value = strings.ReplaceAll(value, key, "[redacted]")
 				}
 			}
 		}

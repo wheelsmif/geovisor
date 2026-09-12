@@ -42,9 +42,9 @@ type Registry interface {
 type Dependencies struct {
 	NewLaunch  func(browser.LaunchOptions) (browser.BrowserSource, error)
 	NewAttach  func(browser.AttachOptions) (browser.BrowserSource, error)
-	Compile    func(compiler.Input) (*tir.Document, error)
+	Compile    func(context.Context, compiler.Input) (*tir.Document, error)
 	Registry   Registry
-	WriteFiles func([]output.File) error
+	WriteFiles func(context.Context, []output.File) error
 }
 
 type inspectOptions struct {
@@ -58,6 +58,7 @@ type inspectOptions struct {
 	Depth              int
 	MaxOperations      int
 	ExplorationTimeout time.Duration
+	FrameTimeout       time.Duration
 	SafeExplore        bool
 	Headful            bool
 	Stealth            bool
@@ -202,6 +203,7 @@ func newInspectCommand(stdout, stderr io.Writer, dependencies Dependencies) *cob
 	flags.IntVar(&options.Depth, "depth", options.Depth, "safe exploration depth (0 = none, 1-16 = nested <details> levels)")
 	flags.IntVar(&options.MaxOperations, "max-operations", options.MaxOperations, "safe exploration operation limit (0-500)")
 	flags.DurationVar(&options.ExplorationTimeout, "exploration-timeout", options.ExplorationTimeout, "safe exploration time limit")
+	flags.DurationVar(&options.FrameTimeout, "frame-timeout", 0, "per-frame extraction deadline (default: exploration timeout plus selector allowance)")
 	flags.BoolVar(&options.SafeExplore, "safe-explore", false, "enable non-navigating, non-submitting safe exploration")
 	flags.BoolVar(&options.Headful, "headful", false, "show launched Chromium")
 	flags.BoolVar(&options.Stealth, "stealth", false, "opt in to limited automation-marker removal")
@@ -290,6 +292,13 @@ func validateInspectInvocation(command *cobra.Command, args []string, options *i
 	if options.ExplorationTimeout <= 0 || options.ExplorationTimeout > maxExplorationTimeout {
 		return usagef("--exploration-timeout must be positive and at most %s", maxExplorationTimeout)
 	}
+	if !command.Flags().Changed("frame-timeout") {
+		options.FrameTimeout = 0
+	} else if options.FrameTimeout <= 0 {
+		return usagef("--frame-timeout must be positive")
+	} else if options.FrameTimeout < options.ExplorationTimeout {
+		return usagef("--frame-timeout must be at least --exploration-timeout")
+	}
 	return nil
 }
 
@@ -340,7 +349,7 @@ func executeInspect(
 		return classify(ExitOutput, err)
 	}
 
-	document, err := dependencies.Compile(result.Input)
+	document, err := dependencies.Compile(ctx, result.Input)
 	if err != nil {
 		return classify(ExitCompile, fmt.Errorf("compile observation: %w", err))
 	}
@@ -373,12 +382,12 @@ func executeInspect(
 		if err != nil {
 			return classify(ExitOutput, err)
 		}
-		if err := dependencies.WriteFiles(files); err != nil {
+		if err := dependencies.WriteFiles(ctx, files); err != nil {
 			return classify(ExitOutput, err)
 		}
 		return nil
 	}
-	return writeSingleOutput(stdout, stderr, options, results[0], dependencies.WriteFiles)
+	return writeSingleOutput(ctx, stdout, stderr, options, results[0], dependencies.WriteFiles)
 }
 
 func makeSource(options inspectOptions, dependencies Dependencies) (browser.BrowserSource, error) {
@@ -396,6 +405,7 @@ func makeSource(options inspectOptions, dependencies Dependencies) (browser.Brow
 			Timeout:         options.Timeout,
 			DOMQuietPeriod:  options.DOMQuiet,
 			DOMQuietTimeout: options.DOMQuietTimeout,
+			FrameTimeout:    options.FrameTimeout,
 			Extraction:      extraction,
 		})
 	}
@@ -407,6 +417,7 @@ func makeSource(options inspectOptions, dependencies Dependencies) (browser.Brow
 		Timeout:         options.Timeout,
 		DOMQuietPeriod:  options.DOMQuiet,
 		DOMQuietTimeout: options.DOMQuietTimeout,
+		FrameTimeout:    options.FrameTimeout,
 		Stealth:         options.Stealth,
 		Extraction:      extraction,
 	})
@@ -452,10 +463,11 @@ func allOutputFiles(directory string, results []emitter.Result) ([]output.File, 
 }
 
 func writeSingleOutput(
+	ctx context.Context,
 	stdout, stderr io.Writer,
 	options inspectOptions,
 	result emitter.Result,
-	writeFiles func([]output.File) error,
+	writeFiles func(context.Context, []output.File) error,
 ) error {
 	files := make([]output.File, 0, 2)
 	if options.Output != "" {
@@ -486,7 +498,7 @@ func writeSingleOutput(
 		return classify(ExitOutput, err)
 	}
 	if len(files) > 0 {
-		if err := writeFiles(files); err != nil {
+		if err := writeFiles(ctx, files); err != nil {
 			return classify(ExitOutput, err)
 		}
 	}
