@@ -468,8 +468,9 @@ func compileTools(accumulators map[string]*toolAccumulator, warnings *[]pendingW
 			Provenance: provenance,
 		}
 		tool.Parameters = compileParameters(accumulator, warnings)
-		tool.Locators = compileLocators(accumulator, id)
-		tool.Actions = compileActions(accumulator, id, tool.Locators, warnings)
+		idByLocator := locatorIDs(accumulator, id)
+		tool.Locators = compileLocators(accumulator, idByLocator)
+		tool.Actions = compileActions(accumulator, idByLocator, tool.Locators, warnings)
 		result = append(result, compiledTool{key: key, tool: tool})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].tool.ID < result[j].tool.ID })
@@ -505,27 +506,32 @@ func compileParameters(accumulator *toolAccumulator, warnings *[]pendingWarning)
 	return result
 }
 
-func compileLocators(accumulator *toolAccumulator, toolID string) []tir.LocatorCandidate {
+// locatorIDs is the single derivation of locator IDs for a tool. compileLocators
+// and compileActions share the map so an action cannot name an ID that was
+// never assigned (GV-021).
+func locatorIDs(accumulator *toolAccumulator, toolID string) map[string]string {
+	keys := sortedMapKeys(accumulator.locators)
+	return stableIDs(keys, func(key string) string {
+		return toolID + "-locator-" + locatorSlug(accumulator.locators[key].locator) + "-" + digest(key)
+	})
+}
+
+func compileLocators(accumulator *toolAccumulator, ids map[string]string) []tir.LocatorCandidate {
 	keys := sortedMapKeys(accumulator.locators)
 	type ranked struct {
 		key   string
 		value tir.LocatorCandidate
 	}
 	values := make([]ranked, 0, len(keys))
-	locatorIDKeys := make([]string, len(keys))
-	for i, key := range keys {
+	for _, key := range keys {
 		item := accumulator.locators[key]
 		score, provenance := aggregateEvidence(item.evidence)
 		item.locator.Confidence = tir.Confidence{
 			Score: score, Rationale: confidenceRationale(len(item.evidence)),
 		}
 		item.locator.Provenance = provenance
-		locatorIDKeys[i] = key
 		values = append(values, ranked{key: key, value: item.locator})
 	}
-	ids := stableIDs(locatorIDKeys, func(key string) string {
-		return toolID + "-locator-" + locatorSlug(accumulator.locators[key].locator) + "-" + digest(key)
-	})
 	for i := range values {
 		values[i].value.ID = ids[values[i].key]
 	}
@@ -542,11 +548,7 @@ func compileLocators(accumulator *toolAccumulator, toolID string) []tir.LocatorC
 	return result
 }
 
-func compileActions(accumulator *toolAccumulator, toolID string, locators []tir.LocatorCandidate, warnings *[]pendingWarning) []tir.ActionBinding {
-	locatorKeys := sortedMapKeys(accumulator.locators)
-	locatorIDs := stableIDs(locatorKeys, func(key string) string {
-		return toolID + "-locator-" + locatorSlug(accumulator.locators[key].locator) + "-" + digest(key)
-	})
+func compileActions(accumulator *toolAccumulator, ids map[string]string, locators []tir.LocatorCandidate, warnings *[]pendingWarning) []tir.ActionBinding {
 	locatorRank := make(map[string]int, len(locators))
 	for index, locator := range locators {
 		locatorRank[locator.ID] = index
@@ -557,7 +559,7 @@ func compileActions(accumulator *toolAccumulator, toolID string, locators []tir.
 		item := accumulator.actions[key]
 		item.action.LocatorCandidateIDs = make([]string, 0, len(item.locatorKeys))
 		for _, locatorKey := range item.locatorKeys {
-			item.action.LocatorCandidateIDs = append(item.action.LocatorCandidateIDs, locatorIDs[locatorKey])
+			item.action.LocatorCandidateIDs = append(item.action.LocatorCandidateIDs, ids[locatorKey])
 		}
 		sort.Slice(item.action.LocatorCandidateIDs, func(i, j int) bool {
 			return locatorRank[item.action.LocatorCandidateIDs[i]] < locatorRank[item.action.LocatorCandidateIDs[j]]
@@ -1163,10 +1165,16 @@ func firstOrEmpty(values []string) string {
 	return values[0]
 }
 
+// sortedUniqueStrings returns a sorted copy of values with duplicates removed.
+// It does not mutate the argument.
 func sortedUniqueStrings(values []string) []string {
-	sort.Strings(values)
-	result := values[:0]
-	for _, value := range values {
+	if len(values) == 0 {
+		return values
+	}
+	sorted := append([]string(nil), values...)
+	sort.Strings(sorted)
+	result := make([]string, 0, len(sorted))
+	for _, value := range sorted {
 		if len(result) == 0 || result[len(result)-1] != value {
 			result = append(result, value)
 		}

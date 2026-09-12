@@ -231,6 +231,122 @@ func TestValidateContractInvariants(t *testing.T) {
 			},
 			code: "unknown_tool",
 		},
+		{
+			name: "unsupported version",
+			mutate: func(document *Document) {
+				document.SchemaVersion = "0.0.0"
+			},
+			code: "unsupported_version",
+		},
+		{
+			name: "invalid execution boundary",
+			mutate: func(document *Document) {
+				document.Source.ExecutionBoundary = "host_daemon"
+			},
+			code: "invalid_execution_boundary",
+		},
+		{
+			name: "inconsistent complete coverage",
+			mutate: func(document *Document) {
+				document.FrameCoverage.Uncovered = []UncoveredFrame{{
+					Path:   []FrameReference{{Index: 1}},
+					Reason: "inaccessible",
+				}}
+			},
+			code: "inconsistent_complete_coverage",
+		},
+		{
+			name: "inconsistent unavailable coverage",
+			mutate: func(document *Document) {
+				document.FrameCoverage.Status = CoverageUnavailable
+			},
+			code: "inconsistent_unavailable_coverage",
+		},
+		{
+			name: "invalid coverage status",
+			mutate: func(document *Document) {
+				document.FrameCoverage.Status = "maybe"
+			},
+			code: "invalid_coverage_status",
+		},
+		{
+			name: "duplicate frame path",
+			mutate: func(document *Document) {
+				document.FrameCoverage.Frames = []CoveredFrame{
+					{Path: []FrameReference{{Index: 0, Name: "one"}}},
+					{Path: []FrameReference{{Index: 0, Name: "one"}}},
+				}
+			},
+			code: "duplicate_frame_path",
+		},
+		{
+			name: "duplicate parameter name",
+			mutate: func(document *Document) {
+				document.Tools[0].Parameters = append(document.Tools[0].Parameters, document.Tools[0].Parameters[0])
+			},
+			code: "duplicate_parameter_name",
+		},
+		{
+			name: "missing locator strategy",
+			mutate: func(document *Document) {
+				document.Tools[0].Locators[0].Semantic = nil
+				document.Tools[0].Locators[0].CSSFallback = ""
+			},
+			code: "missing_locator_strategy",
+		},
+		{
+			name: "duplicate locator reference",
+			mutate: func(document *Document) {
+				id := document.Tools[0].Actions[0].LocatorCandidateIDs[0]
+				document.Tools[0].Actions[0].LocatorCandidateIDs = []string{id, id}
+			},
+			code: "duplicate_locator_reference",
+		},
+		{
+			name: "duplicate enum value",
+			mutate: func(document *Document) {
+				document.Tools[0].Parameters[0].Enum = []string{"alpha", "alpha"}
+			},
+			code: "duplicate_enum_value",
+		},
+		{
+			name: "empty tool id",
+			mutate: func(document *Document) {
+				document.Tools[0].ID = ""
+			},
+			code: "required",
+		},
+		{
+			name: "empty tool name",
+			mutate: func(document *Document) {
+				document.Tools[0].Name = ""
+			},
+			code: "required",
+		},
+		{
+			name: "empty locator id",
+			mutate: func(document *Document) {
+				document.Tools[0].Locators[0].ID = ""
+			},
+			code: "required",
+		},
+		{
+			name: "empty warning code",
+			mutate: func(document *Document) {
+				document.Warnings = []Warning{{Code: "", Message: "missing code"}}
+			},
+			code: "required",
+		},
+		{
+			name: "empty uncovered reason",
+			mutate: func(document *Document) {
+				document.FrameCoverage.Status = CoveragePartial
+				document.FrameCoverage.Uncovered = []UncoveredFrame{{
+					Path: []FrameReference{{Index: 1}},
+				}}
+			},
+			code: "required",
+		},
 	}
 	for _, test := range tests {
 		test := test

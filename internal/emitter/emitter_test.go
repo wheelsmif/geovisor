@@ -107,8 +107,8 @@ func TestOpenAIStrictOptionalityAndNestedObjects(t *testing.T) {
 
 	nonStrict := emitOpenAITools(t, false)
 	strict := emitOpenAITools(t, true)
-	nonStrictSchema := findOpenAITool(t, nonStrict, "complex_tool")["parameters"].(map[string]any)
-	strictSchema := findOpenAITool(t, strict, "complex_tool")["parameters"].(map[string]any)
+	nonStrictSchema := jsonObject(t, findOpenAITool(t, nonStrict, "complex_tool")["parameters"], "non-strict parameters")
+	strictSchema := jsonObject(t, findOpenAITool(t, strict, "complex_tool")["parameters"], "strict parameters")
 
 	assertStrings(t, nonStrictSchema["required"], []string{"query"})
 	assertStrings(t, strictSchema["required"], []string{"query", "options"})
@@ -132,13 +132,13 @@ func TestOpenAIStrictOptionalityAndNestedObjects(t *testing.T) {
 	assertStrings(t, filters["required"], []string{"label"})
 	label := propertySchema(t, filters, "label")
 	assertStrings(t, label["type"], []string{"string", "null"})
-	labelEnum := label["enum"].([]any)
+	labelEnum := jsonArray(t, label["enum"], "label.enum")
 	if len(labelEnum) != 3 || labelEnum[2] != nil {
 		t.Fatalf("strict optional enum = %#v, want trailing null", labelEnum)
 	}
 
 	tags := propertySchema(t, strictOptions, "tags")
-	items := tags["items"].(map[string]any)
+	items := jsonObject(t, tags["items"], "tags.items")
 	if items["additionalProperties"] != false {
 		t.Fatal("strict array object item must deny additional properties")
 	}
@@ -197,18 +197,42 @@ func TestAnnotationDerivationForEverySideEffect(t *testing.T) {
 		test := test
 		t.Run(string(test.sideEffect), func(t *testing.T) {
 			t.Parallel()
-			actions := []tir.ActionBinding{{SideEffect: tir.SideEffect{Class: test.sideEffect}}}
-			mcp := deriveMCPAnnotations(actions)
+			document := annotationDocument(test.sideEffect)
+			mcpResult, err := (MCP{}).Emit(context.Background(), document, Options{})
+			if err != nil {
+				t.Fatalf("emit MCP: %v", err)
+			}
+			var manifest struct {
+				Tools []struct {
+					Annotations mcpAnnotations `json:"annotations"`
+				} `json:"tools"`
+			}
+			if err := json.Unmarshal(mcpResult.Primary.Data, &manifest); err != nil {
+				t.Fatalf("decode MCP: %v", err)
+			}
+			if len(manifest.Tools) != 1 {
+				t.Fatalf("MCP tool count = %d", len(manifest.Tools))
+			}
+			mcp := manifest.Tools[0].Annotations
 			if mcp.ReadOnlyHint != test.readOnly ||
 				mcp.DestructiveHint != !test.readOnly ||
 				mcp.IdempotentHint != test.readOnly ||
 				mcp.OpenWorldHint != test.openWorld {
 				t.Fatalf("MCP annotations = %#v", mcp)
 			}
-			web := deriveWebMCPAnnotations(actions)
-			if web.ReadOnlyHint != test.readOnly ||
-				web.ConsequentialHint != test.consequential ||
-				!web.UntrustedContentHint {
+
+			webResult, err := (WebMCP{}).Emit(context.Background(), document, Options{})
+			if err != nil {
+				t.Fatalf("emit WebMCP: %v", err)
+			}
+			definitions := decodeWebMCPDefinitions(t, webResult.Primary.Data)
+			if len(definitions) != 1 {
+				t.Fatalf("WebMCP tool count = %d", len(definitions))
+			}
+			web := jsonObject(t, definitions[0]["annotations"], "annotations")
+			if web["readOnlyHint"] != test.readOnly ||
+				web["consequentialHint"] != test.consequential ||
+				web["untrustedContentHint"] != true {
 				t.Fatalf("WebMCP annotations = %#v", web)
 			}
 		})
@@ -381,15 +405,15 @@ func TestMCPAndWebMCPHonorStrict(t *testing.T) {
 
 	nonStrictMCP := emitMCPTools(t, false)
 	strictMCP := emitMCPTools(t, true)
-	nonStrictSchema := findMCPTool(t, nonStrictMCP, "complex_tool")["inputSchema"].(map[string]any)
-	strictSchema := findMCPTool(t, strictMCP, "complex_tool")["inputSchema"].(map[string]any)
+	nonStrictSchema := jsonObject(t, findMCPTool(t, nonStrictMCP, "complex_tool")["inputSchema"], "non-strict MCP schema")
+	strictSchema := jsonObject(t, findMCPTool(t, strictMCP, "complex_tool")["inputSchema"], "strict MCP schema")
 	assertStrings(t, nonStrictSchema["required"], []string{"query"})
 	assertStrings(t, strictSchema["required"], []string{"query", "options"})
 
 	nonStrictWebMCP := emitWebMCPDefinitions(t, false)
 	strictWebMCP := emitWebMCPDefinitions(t, true)
-	assertStrings(t, findWebMCPTool(t, nonStrictWebMCP, "complex_tool")["inputSchema"].(map[string]any)["required"], []string{"query"})
-	assertStrings(t, findWebMCPTool(t, strictWebMCP, "complex_tool")["inputSchema"].(map[string]any)["required"], []string{"query", "options"})
+	assertStrings(t, jsonObject(t, findWebMCPTool(t, nonStrictWebMCP, "complex_tool")["inputSchema"], "non-strict WebMCP schema")["required"], []string{"query"})
+	assertStrings(t, jsonObject(t, findWebMCPTool(t, strictWebMCP, "complex_tool")["inputSchema"], "strict WebMCP schema")["required"], []string{"query", "options"})
 }
 
 func TestCanceledContext(t *testing.T) {
@@ -459,21 +483,73 @@ func emitWebMCPDefinitions(t *testing.T, strict bool) []map[string]any {
 	if err != nil {
 		t.Fatalf("emit WebMCP: %v", err)
 	}
+	return decodeWebMCPDefinitions(t, result.Primary.Data)
+}
+
+func decodeWebMCPDefinitions(t *testing.T, data []byte) []map[string]any {
+	t.Helper()
 	prefix := []byte("const __geovisorDefinitions = ")
-	start := bytes.Index(result.Primary.Data, prefix)
+	start := bytes.Index(data, prefix)
 	if start < 0 {
 		t.Fatal("WebMCP module is missing definitions")
 	}
 	start += len(prefix)
-	end := bytes.Index(result.Primary.Data[start:], []byte(";\n"))
+	end := bytes.Index(data[start:], []byte(";\n"))
 	if end < 0 {
 		t.Fatal("WebMCP definitions are not terminated")
 	}
 	var definitions []map[string]any
-	if err := json.Unmarshal(result.Primary.Data[start:start+end], &definitions); err != nil {
+	if err := json.Unmarshal(data[start:start+end], &definitions); err != nil {
 		t.Fatalf("decode WebMCP definitions: %v", err)
 	}
 	return definitions
+}
+
+func annotationDocument(class tir.SideEffectClass) *tir.Document {
+	document := tir.NewDocument(tir.SourceMetadata{
+		Kind:              tir.SourceLaunchURL,
+		ExecutionBoundary: tir.ExecutionAgentOwned,
+	})
+	document.FrameCoverage.Status = tir.CoverageComplete
+	document.FrameCoverage.Frames = []tir.CoveredFrame{{Path: []tir.FrameReference{}}}
+	safe := class != tir.SideEffectNavigation &&
+		class != tir.SideEffectSubmission &&
+		class != tir.SideEffectUnknown
+	document.Tools = []tir.Tool{{
+		ID:   "hint_tool",
+		Name: "Hint",
+		Locators: []tir.LocatorCandidate{{
+			ID:          "hint-locator",
+			CSSFallback: "#hint",
+			Confidence:  tir.Confidence{Score: 1},
+		}},
+		Actions: []tir.ActionBinding{{
+			Action:              tir.ActionClick,
+			LocatorCandidateIDs: []string{"hint-locator"},
+			SideEffect:          tir.SideEffect{Class: class, SafeForExploration: safe},
+		}},
+		Confidence: tir.Confidence{Score: 1},
+	}}
+	document.Normalize()
+	return document
+}
+
+func jsonObject(t *testing.T, value any, path string) map[string]any {
+	t.Helper()
+	object, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("%s = %T, want object", path, value)
+	}
+	return object
+}
+
+func jsonArray(t *testing.T, value any, path string) []any {
+	t.Helper()
+	array, ok := value.([]any)
+	if !ok {
+		t.Fatalf("%s = %T, want array", path, value)
+	}
+	return array
 }
 
 func findWebMCPTool(t *testing.T, tools []map[string]any, name string) map[string]any {

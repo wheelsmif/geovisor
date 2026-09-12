@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/url"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -456,7 +455,7 @@ func allOutputFiles(directory string, results []emitter.Result) ([]output.File, 
 			})
 		}
 	}
-	if err := validateOutputCollisions(files); err != nil {
+	if err := output.ValidateFiles(files); err != nil {
 		return nil, err
 	}
 	return files, nil
@@ -494,7 +493,7 @@ func writeSingleOutput(
 		}
 	}
 
-	if err := validateOutputCollisions(files); err != nil {
+	if err := output.ValidateFiles(files); err != nil {
 		return classify(ExitOutput, err)
 	}
 	if len(files) > 0 {
@@ -514,25 +513,6 @@ func validateArtifactName(name string) error {
 	if name == "" || name == "." || filepath.Base(name) != name ||
 		strings.ContainsAny(name, `/\`) {
 		return fmt.Errorf("unsafe emitter artifact name %q", name)
-	}
-	return nil
-}
-
-func validateOutputCollisions(files []output.File) error {
-	seen := make(map[string]string, len(files))
-	for _, file := range files {
-		absolute, err := filepath.Abs(filepath.Clean(file.Path))
-		if err != nil {
-			return fmt.Errorf("resolve output path %q: %w", file.Path, err)
-		}
-		key := absolute
-		if runtime.GOOS == "windows" {
-			key = strings.ToLower(key)
-		}
-		if previous, exists := seen[key]; exists {
-			return fmt.Errorf("output path collision: %q and %q", previous, file.Path)
-		}
-		seen[key] = file.Path
 	}
 	return nil
 }

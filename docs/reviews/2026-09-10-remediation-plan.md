@@ -5,7 +5,7 @@ Plan of record for the 48 findings in
 during remediation. Finding IDs are stable and are never renumbered; this
 document tracks each `GV-NNN` to a phase, a task, and an exit condition.
 
-Status: **Phases 1, 2, 3, 4, and 5 complete.** Every finding was re-confirmed against the
+Status: **Phases 1, 2, 3, 4, 5, and 6 complete.** Every finding was re-confirmed against the
 working tree before this plan was written.
 
 ## Findings added during remediation
@@ -889,6 +889,10 @@ Low blast radius, done last, but not skipped.
 - **GV-023 (S4)** — `deriveMCPAnnotations` and `deriveWebMCPAnnotations` are
   near-identical; `validateOutputCollisions` duplicates `validateFiles` exactly.
 
+**Done.** `locatorIDs` is computed once per tool and passed to both compilers.
+The three helpers copy before sorting. MCP and WebMCP share `annotationHintsFrom`;
+the CLI calls `output.ValidateFiles` instead of a second collision walk.
+
 ### 6.2 GV-032 — Assorted small defects (S4)
 
 - The `role="search"` branch in `formInteraction` is unreachable: if
@@ -898,6 +902,11 @@ Low blast radius, done last, but not skipped.
 - `webMCPPrefix`'s length is omitted from the emitted-data capacity calculation,
   forcing a reallocation.
 - `cleanText`'s `slice(limit)` on UTF-16 code units can split a surrogate pair.
+
+**Done.** `formInteraction` uses `explicitRole(form) || "form"`. `parameterName`
+caps after the numeric prefix, in code points. `cleanText` already bounded by
+code points in Phase 2; a test now locks the surrogate-pair case. The
+`webMCPPrefix` capacity term was restored when Phase 2 rewrote the emitter.
 
 ### 6.3 Test backfill
 
@@ -925,6 +934,14 @@ Low blast radius, done last, but not skipped.
   test, but nothing yet runs them against one DOM that hosts a frame in a
   shadow root. Neither jsdom nor the corpus exercises that case.
 
+**Done.** Annotation derivation goes through `Emit`. `types_test.go` uses
+`tir.Marshal`. CLI, validation-code, and type-assertion gaps have table-driven
+or direct tests. `testdata/corpus/shadow-frame.html` is the shared tree;
+`client/test/locate.test.mjs` runs `frameCandidates` against that DOM, and
+`TestCollectFrameOwnerOrderCountsShadowHostedFramesAfterLightSiblings` is the
+matching proto-tree case. jsdom does not give shadow-hosted iframes a
+`contentDocument`, so the agreement is the numbering, not an executed fill.
+
 ### 6.4 Documentation
 
 - **GV-045 (S3)** — `client/README.md`, `docs/adr/0001-execution-boundary.md`,
@@ -937,7 +954,9 @@ Low blast radius, done last, but not skipped.
   forbids building from it. Sitting at the repository root, it invites exactly
   that.
 
-**Phase exit:** All 48 findings closed.
+**Done.** The three docs speak in the present tense. The root plan is gone.
+
+**Phase exit — met.** All 49 findings closed.
 
 ---
 

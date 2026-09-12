@@ -44,6 +44,7 @@ func TestCompileAggregatesDeterministically(t *testing.T) {
 	if len(search.Actions) != 1 {
 		t.Fatalf("search actions = %d, want deduplicated action", len(search.Actions))
 	}
+	assertActionsReferenceCompiledLocators(t, search)
 	if search.Actions[0].SideEffect.Class != tir.SideEffectNetwork {
 		t.Fatalf("side effect = %q, want conservative network", search.Actions[0].SideEffect.Class)
 	}
@@ -493,4 +494,19 @@ func assertWarning(t *testing.T, document *tir.Document, code string) {
 		}
 	}
 	t.Fatalf("warning %q not found", code)
+}
+
+func assertActionsReferenceCompiledLocators(t *testing.T, tool tir.Tool) {
+	t.Helper()
+	ids := make(map[string]struct{}, len(tool.Locators))
+	for _, locator := range tool.Locators {
+		ids[locator.ID] = struct{}{}
+	}
+	for _, action := range tool.Actions {
+		for _, id := range action.LocatorCandidateIDs {
+			if _, exists := ids[id]; !exists {
+				t.Fatalf("action %q references locator %q, which was not compiled onto the tool", action.Action, id)
+			}
+		}
+	}
 }

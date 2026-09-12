@@ -31,8 +31,8 @@ automation, protocol, or emitter-specific types.
 
 ## Process and streams
 
-Browser execution belongs to the calling agent and its session. GEO-Visor will
-accept browser access through explicit source adapters; it will not expose a
+Browser execution belongs to the calling agent and its session. GEO-Visor
+accepts browser access through explicit source adapters; it does not expose a
 long-running host MCP daemon. Standard output is reserved for artifacts.
 Human-readable help, version output, and diagnostics use standard error.
 

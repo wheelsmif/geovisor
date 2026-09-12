@@ -451,6 +451,36 @@ test("repeated extraction is deterministic", async () => {
   assert.equal(second, first);
 });
 
+// GV-032. The 80-character cap used to apply only when the name did not start
+// with a digit, so numeric labels were unbounded.
+test("caps parameter names that start with a digit", async () => {
+  const label = `1${"a".repeat(90)}`;
+  const dom = page(`<input aria-label="${label}">`);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  const name = interactions(batch, "control")[0].parameters[0].name;
+  assert.equal(name.length, 80);
+  assert.match(name, /^value1/u);
+});
+
+// GV-032. Bounding by UTF-16 code units can split a surrogate pair. 255 BMP
+// characters plus an emoji is 256 code points and 257 UTF-16 units; the emoji
+// must survive.
+test("does not split a surrogate pair when bounding page text", async () => {
+  const label = `${"x".repeat(255)}\u{1F600}`;
+  const dom = page(`<input aria-label="${label}">`);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.equal(interactions(batch, "control")[0].name, label);
+});
+
+// GV-032. `explicitRole` already maps role="search"; a second branch was
+// unreachable. The form still records search rather than falling through to
+// the "form" default.
+test("records an explicit search role on a form", async () => {
+  const dom = page(`<form role="search" aria-label="Find"><input aria-label="Query"></form>`);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.equal(interactions(batch, "form")[0].role, "search");
+});
+
 test("matches the shared Go and Node observation fixture", async () => {
   const dom = page("<input aria-label='Query'>");
   const actual = JSON.parse(JSON.stringify(await dom.window.__GEOVISOR_EXTRACT__()));

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,8 +92,19 @@ func TestInspectRejectsInvalidModesBeforeSourceConstruction(t *testing.T) {
 		{name: "invalid target", args: []string{"inspect", "--cdp", "http://127.0.0.1:9222", "--target", "first"}},
 		{name: "invalid quiet timing", args: []string{"inspect", "https://example.test", "--dom-quiet", "2s", "--dom-quiet-timeout", "1s"}},
 		{name: "invalid depth", args: []string{"inspect", "https://example.test", "--depth", "17"}},
+		{name: "negative depth", args: []string{"inspect", "https://example.test", "--depth", "-1"}},
 		{name: "frame timeout below exploration", args: []string{"inspect", "https://example.test", "--exploration-timeout", "2s", "--frame-timeout", "1s"}},
 		{name: "zero frame timeout", args: []string{"inspect", "https://example.test", "--frame-timeout", "0"}},
+		{name: "unsupported format", args: []string{"inspect", "https://example.test", "--format", "yaml"}},
+		{name: "bindings with all", args: []string{"inspect", "https://example.test", "--format", "all", "--output", "out", "--bindings-output", "b.json"}},
+		{name: "openai-strict with tir", args: []string{"inspect", "https://example.test", "--openai-strict"}},
+		{name: "zero timeout", args: []string{"inspect", "https://example.test", "--timeout", "0"}},
+		{name: "zero dom-quiet", args: []string{"inspect", "https://example.test", "--dom-quiet", "0"}},
+		{name: "max-operations over cap", args: []string{"inspect", "https://example.test", "--max-operations", "501"}},
+		{name: "zero exploration timeout", args: []string{"inspect", "https://example.test", "--exploration-timeout", "0"}},
+		{name: "target requires attach", args: []string{"inspect", "https://example.test", "--target", "id:page-1"}},
+		{name: "attach rejects stealth", args: []string{"inspect", "--cdp", "http://127.0.0.1:9222", "--stealth"}},
+		{name: "attach rejects browser-executable", args: []string{"inspect", "--cdp", "http://127.0.0.1:9222", "--browser-executable", "chrome"}},
 	}
 	for _, test := range tests {
 		test := test
@@ -466,6 +478,104 @@ func TestDiagnosticsRemainNonfatalAndTyped(t *testing.T) {
 	}
 }
 
+func TestUnknownCommandIsUsage(t *testing.T) {
+	t.Parallel()
+	err := RunWithDependencies(
+		context.Background(), []string{"frobnicate"}, &bytes.Buffer{}, &bytes.Buffer{}, successfulDependencies(),
+	)
+	if ExitCode(err) != ExitUsage || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("error = %v, exit = %d", err, ExitCode(err))
+	}
+}
+
+func TestExitGenericFallbackAndNilDependencies(t *testing.T) {
+	t.Parallel()
+	if got := ExitCode(errors.New("plain failure")); got != ExitGeneric {
+		t.Fatalf("ExitCode(plain) = %d, want %d", got, ExitGeneric)
+	}
+	err := RunWithDependencies(
+		context.Background(), []string{"inspect", "https://example.test"},
+		&bytes.Buffer{}, &bytes.Buffer{}, Dependencies{},
+	)
+	if ExitCode(err) != ExitGeneric || !strings.Contains(err.Error(), "launch dependency") {
+		t.Fatalf("nil dependencies error = %v, exit = %d", err, ExitCode(err))
+	}
+}
+
+func TestInvalidBrowserConfigurationIsUsage(t *testing.T) {
+	t.Parallel()
+	dependencies := successfulDependencies()
+	dependencies.NewLaunch = func(browser.LaunchOptions) (browser.BrowserSource, error) {
+		return nil, &browser.Error{
+			Code: browser.ErrorInvalidConfiguration, Message: "URL must be HTTP(S)",
+		}
+	}
+	err := RunWithDependencies(
+		context.Background(), []string{"inspect", "https://example.test"},
+		&bytes.Buffer{}, &bytes.Buffer{}, dependencies,
+	)
+	if ExitCode(err) != ExitUsage || !strings.Contains(err.Error(), "URL must be HTTP(S)") {
+		t.Fatalf("error = %v, exit = %d", err, ExitCode(err))
+	}
+}
+
+func TestValidateArtifactName(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"", ".", "foo/bar.json", `foo\bar.json`, "../escape.json"} {
+		if err := validateArtifactName(name); err == nil {
+			t.Errorf("validateArtifactName(%q) succeeded", name)
+		}
+	}
+	if err := validateArtifactName("tools.mcp.json"); err != nil {
+		t.Fatalf("safe name rejected: %v", err)
+	}
+}
+
+func TestAllOutputRejectsUnsafeArtifactNames(t *testing.T) {
+	t.Parallel()
+	dependencies := successfulDependencies()
+	dependencies.Registry = stubRegistry{emit: func(
+		context.Context, emitter.Format, *tir.Document, emitter.Options,
+	) (emitter.Result, error) {
+		return emitter.Result{Primary: emitter.Artifact{
+			Name: "../escape.json", Data: []byte("artifact"),
+		}}, nil
+	}}
+	writes := 0
+	dependencies.WriteFiles = func(context.Context, []output.File) error {
+		writes++
+		return nil
+	}
+	err := RunWithDependencies(context.Background(), []string{
+		"inspect", "https://example.test", "--format", "all", "--output", t.TempDir(),
+	}, &bytes.Buffer{}, &bytes.Buffer{}, dependencies)
+	if ExitCode(err) != ExitOutput || !strings.Contains(err.Error(), "unsafe emitter artifact name") {
+		t.Fatalf("error = %v, exit = %d", err, ExitCode(err))
+	}
+	if writes != 0 {
+		t.Fatalf("writer called %d times for an unsafe artifact name", writes)
+	}
+}
+
+func TestWriteBytesReportsShortWrite(t *testing.T) {
+	t.Parallel()
+	err := writeBytes(stallWriter{}, []byte("artifact"))
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("error = %v, want io.ErrShortWrite", err)
+	}
+}
+
+func TestInspectStdoutShortWriteIsOutputFailure(t *testing.T) {
+	t.Parallel()
+	err := RunWithDependencies(
+		context.Background(), []string{"inspect", "https://example.test"},
+		stallWriter{}, &bytes.Buffer{}, successfulDependencies(),
+	)
+	if ExitCode(err) != ExitOutput || !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("error = %v, exit = %d", err, ExitCode(err))
+	}
+}
+
 func TestExitCodeMappingAndCancellation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -576,6 +686,12 @@ func formatStrings(formats []emitter.Format) []string {
 		result[index] = string(format)
 	}
 	return result
+}
+
+type stallWriter struct{}
+
+func (stallWriter) Write([]byte) (int, error) {
+	return 0, nil
 }
 
 func assertFileData(t *testing.T, path, want string) {

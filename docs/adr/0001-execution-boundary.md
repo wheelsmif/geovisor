@@ -9,9 +9,9 @@ service or browser lifecycle.
 
 ## Decision
 
-Browser execution is agent-owned. Future `BrowserSource` adapters may launch a
-URL or attach through CDP only within the caller's existing session. GEO-Visor
-will not provide a host MCP daemon.
+Browser execution is agent-owned. `BrowserSource` adapters launch a URL or
+attach through CDP only within the caller's existing session. GEO-Visor does
+not provide a host MCP daemon.
 
 ## Consequences
 

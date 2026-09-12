@@ -66,7 +66,7 @@ func writeFiles(ctx context.Context, files []File, ops fileOps) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("write files: %w", err)
 	}
-	if err := validateFiles(files); err != nil {
+	if err := ValidateFiles(files); err != nil {
 		return err
 	}
 
@@ -165,7 +165,9 @@ func writeFiles(ctx context.Context, files []File, ops fileOps) error {
 	return nil
 }
 
-func validateFiles(files []File) error {
+// ValidateFiles rejects empty paths and colliding destinations. The CLI uses
+// the same check before WriteFiles so --format all can fail before any replace.
+func ValidateFiles(files []File) error {
 	seen := make(map[string]string, len(files))
 	for index, file := range files {
 		if strings.TrimSpace(file.Path) == "" {

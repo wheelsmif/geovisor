@@ -45,8 +45,55 @@ function buildDOM() {
     url: FIXTURE_URL,
     virtualConsole,
   });
+  upgradeDeclarativeShadows(dom.window.document);
   populateSrcdocFrames(dom.window.document);
   return dom;
+}
+
+function isFrame(element) {
+  return element.localName === "iframe" || element.localName === "frame";
+}
+
+// The same walk as `frameCandidates` / `collectFrameOwnerOrder`: pre-order,
+// light children before shadow content, and no descent past a frame. querySelectorAll
+// cannot see a frame hosted in a shadow root, which is the case shadow-frame.html
+// exists to exercise.
+function visitTree(root, visitElement) {
+  const visit = (element) => {
+    visitElement(element);
+    if (isFrame(element)) return;
+    for (const child of Array.from(element.children)) visit(child);
+    if (element.shadowRoot) {
+      for (const child of Array.from(element.shadowRoot.children)) visit(child);
+    }
+  };
+  for (const child of Array.from(root.children)) visit(child);
+}
+
+// jsdom 30 parses `<template shadowrootmode>` as an ordinary template, so a
+// fixture that hosts a frame in a shadow root would otherwise lose that frame.
+// This upgrade matches what a browser does with declarative shadow DOM and
+// keeps frameCandidates / collectFrameOwnerOrder looking at the same tree.
+function upgradeDeclarativeShadows(root) {
+  visitTree(root, (element) => {
+    if (element.shadowRoot) return;
+    const template = [...element.children].find(
+      (child) => child.localName === "template" && child.hasAttribute("shadowrootmode"),
+    );
+    if (!template) return;
+    const mode = template.getAttribute("shadowrootmode") === "closed" ? "closed" : "open";
+    const shadow = element.attachShadow({ mode });
+    shadow.append(template.content.cloneNode(true));
+    template.remove();
+  });
+}
+
+function frameContentDocument(frame) {
+  try {
+    return frame.contentDocument;
+  } catch {
+    return null;
+  }
 }
 
 // jsdom creates a contentDocument for an iframe but never parses `srcdoc`, so a
@@ -56,13 +103,14 @@ function buildDOM() {
 function populateSrcdocFrames(document, depth = 4) {
   if (depth <= 0) return;
   let populated = false;
-  for (const frame of document.querySelectorAll("iframe[srcdoc]")) {
-    const inner = frame.contentDocument;
-    if (!inner || inner.body?.hasChildNodes()) continue;
-    inner.body.innerHTML = frame.getAttribute("srcdoc");
+  visitTree(document, (element) => {
+    if (element.localName !== "iframe" || !element.hasAttribute("srcdoc")) return;
+    const inner = frameContentDocument(element);
+    if (!inner || inner.body?.hasChildNodes()) return;
+    inner.body.innerHTML = element.getAttribute("srcdoc");
     populated = true;
     populateSrcdocFrames(inner, depth - 1);
-  }
+  });
   if (populated) populateSrcdocFrames(document, depth - 1);
 }
 
@@ -71,20 +119,15 @@ function populateSrcdocFrames(document, depth = 4) {
 // order the runtime numbers them so an index is stable and meaningful.
 function collectElements(document) {
   const elements = [];
-  const visit = (root) => {
-    for (const element of root.querySelectorAll("*")) {
+  const visitRoot = (root) => {
+    visitTree(root, (element) => {
       elements.push(element);
-      if (element.localName !== "iframe" && element.localName !== "frame") continue;
-      let inner = null;
-      try {
-        inner = element.contentDocument;
-      } catch {
-        inner = null;
-      }
-      if (inner?.documentElement) visit(inner);
-    }
+      if (!isFrame(element)) return;
+      const inner = frameContentDocument(element);
+      if (inner?.documentElement) visitRoot(inner);
+    });
   };
-  visit(document);
+  visitRoot(document);
   return elements;
 }
 
@@ -93,15 +136,11 @@ function collectElements(document) {
 // frame-scoped action resolved to.
 function collectDocuments(root) {
   const documents = [root];
-  for (const frame of root.querySelectorAll("iframe, frame")) {
-    let inner = null;
-    try {
-      inner = frame.contentDocument;
-    } catch {
-      inner = null;
-    }
+  visitTree(root, (element) => {
+    if (!isFrame(element)) return;
+    const inner = frameContentDocument(element);
     if (inner?.documentElement) documents.push(...collectDocuments(inner));
-  }
+  });
   return documents;
 }
 

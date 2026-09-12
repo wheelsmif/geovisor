@@ -82,22 +82,11 @@ func (MCP) Emit(
 }
 
 func deriveMCPAnnotations(actions []tir.ActionBinding) mcpAnnotations {
-	readOnly := true
-	openWorld := false
-	for _, action := range actions {
-		if action.SideEffect.Class != tir.SideEffectNone {
-			readOnly = false
-		}
-		switch action.SideEffect.Class {
-		case tir.SideEffectNetwork, tir.SideEffectNavigation,
-			tir.SideEffectSubmission, tir.SideEffectUnknown:
-			openWorld = true
-		}
-	}
+	hints := annotationHintsFrom(actions)
 	return mcpAnnotations{
-		ReadOnlyHint:    readOnly,
-		DestructiveHint: !readOnly,
-		IdempotentHint:  readOnly,
-		OpenWorldHint:   openWorld,
+		ReadOnlyHint:    hints.readOnly,
+		DestructiveHint: !hints.readOnly,
+		IdempotentHint:  hints.readOnly,
+		OpenWorldHint:   hints.openWorld,
 	}
 }

@@ -32,7 +32,7 @@ await globalThis.__GEOVISOR_EXTRACT__({
 ```
 
 The result is the JSON form of `observation.Batch`. The payload is frame-local:
-all interaction frame paths are empty and `coverageReported` is false. A future
+all interaction frame paths are empty and `coverageReported` is false. The
 browser source owns frame discovery, same-session CDP execution, and combining
 frame-local batches.
 

@@ -102,21 +102,10 @@ func (WebMCP) Emit(
 }
 
 func deriveWebMCPAnnotations(actions []tir.ActionBinding) webMCPAnnotations {
-	readOnly := true
-	consequential := false
-	for _, action := range actions {
-		if action.SideEffect.Class != tir.SideEffectNone {
-			readOnly = false
-		}
-		switch action.SideEffect.Class {
-		case tir.SideEffectNetwork, tir.SideEffectNavigation,
-			tir.SideEffectSubmission, tir.SideEffectUnknown:
-			consequential = true
-		}
-	}
+	hints := annotationHintsFrom(actions)
 	return webMCPAnnotations{
-		ReadOnlyHint:         readOnly,
-		ConsequentialHint:    consequential,
+		ReadOnlyHint:         hints.readOnly,
+		ConsequentialHint:    hints.openWorld,
 		UntrustedContentHint: true,
 	}
 }

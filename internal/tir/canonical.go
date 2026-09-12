@@ -130,12 +130,18 @@ func canonicalizeShape(shape *ParameterShape) {
 	}
 }
 
+// canonicalProvenance returns a sorted copy of items with duplicate keys
+// removed. It does not mutate the argument.
 func canonicalProvenance(items []Provenance) []Provenance {
-	sort.Slice(items, func(i, j int) bool {
-		return provenanceKey(items[i]) < provenanceKey(items[j])
+	if len(items) == 0 {
+		return items
+	}
+	sorted := append([]Provenance(nil), items...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return provenanceKey(sorted[i]) < provenanceKey(sorted[j])
 	})
-	result := items[:0]
-	for _, item := range items {
+	result := make([]Provenance, 0, len(sorted))
+	for _, item := range sorted {
 		if len(result) == 0 || provenanceKey(result[len(result)-1]) != provenanceKey(item) {
 			result = append(result, item)
 		}
@@ -143,10 +149,16 @@ func canonicalProvenance(items []Provenance) []Provenance {
 	return result
 }
 
+// sortedUnique returns a sorted copy of values with duplicates removed. It
+// does not mutate the argument.
 func sortedUnique(values []string) []string {
-	sort.Strings(values)
-	result := values[:0]
-	for _, value := range values {
+	if len(values) == 0 {
+		return values
+	}
+	sorted := append([]string(nil), values...)
+	sort.Strings(sorted)
+	result := make([]string, 0, len(sorted))
+	for _, value := range sorted {
 		if len(result) == 0 || result[len(result)-1] != value {
 			result = append(result, value)
 		}

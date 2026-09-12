@@ -143,7 +143,14 @@ func validateSchema(t *testing.T, root, schemaName string, payload []byte) {
 	} {
 		var resource any
 		decodeFile(t, filepath.Join(schemaDirectory, name), &resource)
-		id := resource.(map[string]any)["$id"].(string)
+		resourceObject, ok := resource.(map[string]any)
+		if !ok {
+			t.Fatalf("schema %s is %T, want object", name, resource)
+		}
+		id, ok := resourceObject["$id"].(string)
+		if !ok {
+			t.Fatalf("schema %s $id is %T, want string", name, resourceObject["$id"])
+		}
 		if err := compiler.AddResource(id, resource); err != nil {
 			t.Fatalf("add schema resource %s: %v", name, err)
 		}

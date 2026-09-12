@@ -235,7 +235,10 @@ func TestCollectFrameOwnerOrderCountsShadowHostedFramesAfterLightSiblings(t *tes
 
 	// Light children before shadow content, matching frameCandidates. A frame
 	// inside an earlier host's shadow is still earlier than a later light
-	// sibling frame.
+	// sibling frame. testdata/corpus/shadow-frame.html is the same tree as a
+	// real DOM; client/test/locate.test.mjs runs the TypeScript walk against it.
+	// jsdom does not give shadow-hosted iframes a contentDocument, so the
+	// agreement is the numbering of the frames, not an executed fill inside them.
 	root := &proto.DOMNode{
 		FrameID: "root",
 		Children: []*proto.DOMNode{{

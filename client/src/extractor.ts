@@ -379,10 +379,13 @@ function parameterName(label: string): string {
     .filter(Boolean);
   if (words.length === 0) return "value";
   const [first, ...rest] = words;
-  const result =
+  let result =
     first!.toLocaleLowerCase("en-US") +
     rest.map((word) => word[0]!.toLocaleUpperCase("en-US") + word.slice(1)).join("");
-  return /^\p{Number}/u.test(result) ? `value${result}` : result.slice(0, 80);
+  if (/^\p{Number}/u.test(result)) {
+    result = `value${result}`;
+  }
+  return Array.from(result).slice(0, 80).join("");
 }
 
 function parameterFor(
@@ -562,7 +565,7 @@ function formMembers(form: HTMLFormElement, records: ElementRecord[]): ElementRe
 
 function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): Interaction {
   const form = formRecord.element as HTMLFormElement;
-  const role = explicitRole(form) || (form.getAttribute("role") === "search" ? "search" : "form");
+  const role = explicitRole(form) || "form";
   const label = labelFor(form, role, formRecord.sourceOrder);
   const controls = members.filter((record) => isControl(record.element));
   const names = new Map<string, number>();

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>GEO-Visor shadow-hosted frame corpus</title>
+  </head>
+  <body>
+    <!--
+      A frame inside an earlier host's shadow is still earlier than a later
+      light sibling frame. This is the DOM both walks must agree on:
+      `frameCandidates` in client/src/shared/locate.ts and
+      `collectFrameOwnerOrder` in internal/browser/frames.go. Both are
+      pre-order, light children before shadow content, and do not descend
+      past a frame.
+    -->
+    <div class="host">
+      <template shadowrootmode="open">
+        <iframe srcdoc="<input aria-label='Query'>"></iframe>
+      </template>
+    </div>
+    <iframe srcdoc="<input aria-label='Query'>"></iframe>
+  </body>
+</html>

@@ -122,6 +122,29 @@ func canonicalDocument(ctx context.Context, format Format, document *tir.Documen
 	return canonical, nil
 }
 
+// annotationHints are the side-effect flags shared by MCP and WebMCP. The two
+// formats name the open-world/consequential bit differently but compute it
+// from the same classes (GV-023).
+type annotationHints struct {
+	readOnly  bool
+	openWorld bool
+}
+
+func annotationHintsFrom(actions []tir.ActionBinding) annotationHints {
+	hints := annotationHints{readOnly: true}
+	for _, action := range actions {
+		if action.SideEffect.Class != tir.SideEffectNone {
+			hints.readOnly = false
+		}
+		switch action.SideEffect.Class {
+		case tir.SideEffectNetwork, tir.SideEffectNavigation,
+			tir.SideEffectSubmission, tir.SideEffectUnknown:
+			hints.openWorld = true
+		}
+	}
+	return hints
+}
+
 func canceled(ctx context.Context, format Format) error {
 	if ctx == nil {
 		return failure(format, CodeCanceled, "", "context must not be nil")

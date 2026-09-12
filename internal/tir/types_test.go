@@ -38,11 +38,11 @@ func TestNewDocumentMarshalsCollectionsAsArrays(t *testing.T) {
 	})
 	document.Normalize()
 
-	first, err := json.Marshal(document)
+	first, err := Marshal(document)
 	if err != nil {
 		t.Fatalf("marshal TIR: %v", err)
 	}
-	second, err := json.Marshal(document)
+	second, err := Marshal(document)
 	if err != nil {
 		t.Fatalf("marshal TIR again: %v", err)
 	}
@@ -57,17 +57,25 @@ func TestNewDocumentMarshalsCollectionsAsArrays(t *testing.T) {
 	assertJSONArray(t, decoded, "tools")
 	assertJSONArray(t, decoded, "warnings")
 
-	frameCoverage := decoded["frameCoverage"].(map[string]any)
+	frameCoverage := jsonObject(t, decoded["frameCoverage"], "frameCoverage")
 	assertJSONArray(t, frameCoverage, "frames")
 	assertJSONArray(t, frameCoverage, "uncovered")
 
-	tool := decoded["tools"].([]any)[0].(map[string]any)
+	tools := jsonArray(t, decoded["tools"], "tools")
+	if len(tools) == 0 {
+		t.Fatal("tools must not be empty")
+	}
+	tool := jsonObject(t, tools[0], "tools[0]")
 	assertJSONArray(t, tool, "parameters")
 	assertJSONArray(t, tool, "locatorCandidates")
 	assertJSONArray(t, tool, "actionBindings")
 	assertJSONArray(t, tool, "provenance")
 
-	parameter := tool["parameters"].([]any)[0].(map[string]any)
+	parameters := jsonArray(t, tool["parameters"], "tools[0].parameters")
+	if len(parameters) == 0 {
+		t.Fatal("parameters must not be empty")
+	}
+	parameter := jsonObject(t, parameters[0], "tools[0].parameters[0]")
 	assertJSONArray(t, parameter, "enum")
 	assertJSONArray(t, parameter, "properties")
 }
@@ -138,7 +146,23 @@ func TestSchemaVersionMatchesGoContract(t *testing.T) {
 
 func assertJSONArray(t *testing.T, object map[string]any, key string) {
 	t.Helper()
-	if _, ok := object[key].([]any); !ok {
-		t.Fatalf("%q must be a non-null JSON array, got %T", key, object[key])
+	jsonArray(t, object[key], key)
+}
+
+func jsonObject(t *testing.T, value any, path string) map[string]any {
+	t.Helper()
+	object, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("%s = %T, want object", path, value)
 	}
+	return object
+}
+
+func jsonArray(t *testing.T, value any, path string) []any {
+	t.Helper()
+	array, ok := value.([]any)
+	if !ok {
+		t.Fatalf("%s = %T, want array", path, value)
+	}
+	return array
 }

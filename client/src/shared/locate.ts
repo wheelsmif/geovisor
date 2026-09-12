@@ -74,7 +74,7 @@ function candidates(root: Root): Element[] {
  * descent, light children before shadow content, and no descent past a frame,
  * whose contents belong to a different document.
  */
-function frameCandidates(root: Root): Element[] {
+export function frameCandidates(root: Root): Element[] {
   const frames: Element[] = [];
   const visit = (element: Element): void => {
     if (matchRole(element) === FRAME_ROLE) {
