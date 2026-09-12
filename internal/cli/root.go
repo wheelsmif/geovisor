@@ -195,7 +195,7 @@ func newInspectCommand(stdout, stderr io.Writer, dependencies Dependencies) *cob
 	flags.StringVarP(&options.Format, "format", "f", options.Format, "output format: tir, webmcp, mcp, openai, or all")
 	flags.StringVarP(&options.Output, "output", "o", "", "output file, or output directory with --format all")
 	flags.StringVar(&options.BindingsOutput, "bindings-output", "", "MCP/OpenAI executable bindings file")
-	flags.BoolVar(&options.OpenAIStrict, "openai-strict", false, "emit strict OpenAI function schemas")
+	flags.BoolVar(&options.OpenAIStrict, "openai-strict", false, "emit strict schemas for the OpenAI artifact only")
 	flags.DurationVar(&options.Timeout, "timeout", options.Timeout, "overall browser operation timeout")
 	flags.DurationVar(&options.DOMQuiet, "dom-quiet", options.DOMQuiet, "required DOM quiet period")
 	flags.DurationVar(&options.DOMQuietTimeout, "dom-quiet-timeout", options.DOMQuietTimeout, "maximum DOM quiet wait")
@@ -360,6 +360,11 @@ func executeInspect(
 			emitter.FormatWebMCP,
 			emitter.FormatMCP,
 			emitter.FormatOpenAI,
+		}
+	}
+	if options.all && options.OpenAIStrict {
+		if _, err := fmt.Fprintln(stderr, "note: --openai-strict applies only to the OpenAI artifact"); err != nil {
+			return classify(ExitOutput, fmt.Errorf("write openai-strict note: %w", err))
 		}
 	}
 	results := make([]emitter.Result, 0, len(formats))

@@ -30,9 +30,11 @@ version is injected through:
 
 Builds use `-trimpath`, an empty Go build ID, `-buildvcs=false`, and
 `CGO_ENABLED=0`. The separate `verify-release` script compares repeated native
-binary bytes and checks both aliases' `--version` output. The archive script
-executes only the native target's version command; non-native binaries are
-validated by successful cross-compilation and SHA-256 checksums.
+binary bytes and checks both aliases' `--version` output. Locally it runs from
+`check.sh` / `check.ps1`. In CI it runs in the Source cross-build job, not on
+every Quality OS. The archive script executes only the native target's version
+command; non-native binaries are validated by successful cross-compilation and
+SHA-256 checksums.
 
 Release builds never execute Chromium. At runtime, any later `inspect` launch
 still follows the source adapter's mandatory `Leakless(false)` configuration;

@@ -392,6 +392,9 @@ func TestTypedErrors(t *testing.T) {
 func TestValidDocumentEmitsOnEveryFormat(t *testing.T) {
 	t.Parallel()
 
+	// TIR validity is emitter-agnostic. WebMCP still rejects locator-less
+	// actions as a format-specific execution constraint; the fixture includes
+	// locators so every registered format, including WebMCP, succeeds.
 	registry := DefaultRegistry()
 	for _, format := range registry.Formats() {
 		if _, err := registry.Emit(context.Background(), format, fixtureDocument(), Options{Strict: true}); err != nil {

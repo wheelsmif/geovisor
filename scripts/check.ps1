@@ -21,6 +21,8 @@ try {
 
     Invoke-Step { npm ci }
     Invoke-Step { npm run check }
+    # npm succeeded, so Node is present. Fail the WebMCP harness instead of skipping.
+    $env:GEOVISOR_REQUIRE_NODE = "1"
     $unformatted = gofmt -l .
     if ($unformatted) { throw "gofmt required:`n$($unformatted -join "`n")" }
     Invoke-Step { go vet ./... }

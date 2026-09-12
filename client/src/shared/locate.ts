@@ -96,7 +96,9 @@ export function frameCandidates(root: Root): Element[] {
  *
  * A single pass computes role and name once per element (GV-035); the previous
  * runtime rescanned the subtree and recomputed accessible names for every
- * element once per scope node per resolution attempt.
+ * element once per scope node per resolution attempt. Scope hops still scan
+ * the *new* root — the matched ancestor — because that is a different tree.
+ * Per-action memoization is rejected: apply mutates the DOM between tools.
  */
 function matchIn(elements: Element[], node: SemanticNode): Element[] {
   const wantRole = normalizeRole(node.role);

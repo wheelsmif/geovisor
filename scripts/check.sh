@@ -19,6 +19,8 @@ GOTOOLCHAIN=go$(cat .go-version)
 
 npm ci
 npm run check
+# npm succeeded, so Node is present. Fail the WebMCP harness instead of skipping.
+export GEOVISOR_REQUIRE_NODE=1
 test -z "$(gofmt -l .)"
 go vet ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...

@@ -66,6 +66,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
+    env:
+      GEOVISOR_REQUIRE_NODE: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +103,13 @@ jobs:
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@${{ env.STATICCHECK_VERSION }} ./...
       - name: Test packages and artifact schemas
+        env:
+          # Ubuntu runners ship Chrome; requiring it here closes the silent-skip
+          # path on the OS that can actually run the browser layer. Windows and
+          # macOS quality legs still skip browser tests; the Browser job is the
+          # required Chromium gate. Chrome is the image's preinstalled binary
+          # (no extra supply-chain pin).
+          GEOVISOR_REQUIRE_BROWSER: ${{ runner.os == 'Linux' && '1' || '' }}
         run: go test ./...
 
   browser:

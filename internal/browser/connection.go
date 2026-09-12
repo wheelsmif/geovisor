@@ -9,17 +9,22 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/cdp"
 )
 
-const maxEndpointResponse = 1 << 20
+const (
+	maxEndpointResponse    = 1 << 20
+	endpointRequestTimeout = 10 * time.Second
+)
 
 var errEndpointRedirect = errors.New("CDP endpoint redirected")
 
 func newEndpointClient() *http.Client {
 	return &http.Client{
+		Timeout: endpointRequestTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return errEndpointRedirect
 		},

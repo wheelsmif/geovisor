@@ -192,7 +192,7 @@ func sanitizeText(value string, secrets ...string) string {
 		value = strings.ReplaceAll(value, secret, sanitizeURL(secret))
 		if parsed, err := url.Parse(secret); err == nil {
 			if parsed.User != nil {
-				if username := parsed.User.Username(); username != "" {
+				if username := parsed.User.Username(); len(username) >= 3 {
 					value = strings.ReplaceAll(value, username, "[redacted]")
 				}
 				if password, set := parsed.User.Password(); set && password != "" {
@@ -202,7 +202,10 @@ func sanitizeText(value string, secrets ...string) string {
 			}
 			for _, values := range parsed.Query() {
 				for _, item := range values {
-					if item != "" {
+					// Single-character and two-character values are not secrets
+					// worth scanning for; replacing them shreds ordinary
+					// diagnostics (GV-006).
+					if len(item) >= 3 {
 						value = strings.ReplaceAll(value, item, "[redacted]")
 					}
 				}

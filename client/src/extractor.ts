@@ -16,7 +16,15 @@ import type {
   Warning,
 } from "./types";
 import { cleanText, DESCRIPTION_LIMIT, humanize } from "./shared/text";
-import { explicitRole, inputType, parentAcrossShadow, read, referencedText } from "./shared/dom";
+import {
+  beginReadAccounting,
+  explicitRole,
+  inputType,
+  parentAcrossShadow,
+  read,
+  readExpected,
+  referencedText,
+} from "./shared/dom";
 import { GENERIC_ROLE, isContentEditable, semanticRole } from "./shared/role";
 import { semanticMatches } from "./shared/locate";
 import { accessibleName, type NameSource } from "./shared/name";
@@ -192,7 +200,7 @@ function cssFallback(element: Element): string {
   if (root.nodeType !== 9) {
     return fallback;
   }
-  return read(fallback, () =>
+  return readExpected(fallback, () =>
     finder(element, {
       attr: (name) => name === "role" || name === "type",
       className: () => false,
@@ -261,19 +269,47 @@ function traverse(root: Document | ShadowRoot): ElementRecord[] {
 }
 
 function semanticScope(element: Element): SemanticNode[] {
-  const reversed: SemanticNode[] = [];
+  const landmarks: Element[] = [];
   let current = parentAcrossShadow(element);
-  while (current && reversed.length < 4) {
+  while (current && landmarks.length < 4) {
     const role = semanticRole(current);
     if (LANDMARK_ROLES.has(role)) {
       const name = labelFor(current, role, 0);
       if (name.reference !== "deterministic-fallback") {
-        reversed.push({ role, name: name.text });
+        landmarks.push(current);
       }
     }
     current = parentAcrossShadow(current);
   }
-  return reversed.reverse();
+  landmarks.reverse();
+
+  const nodes: SemanticNode[] = [];
+  let scopeRoot: Document | ShadowRoot | Element | null = read<Document | ShadowRoot | null>(
+    null,
+    () => {
+      const node = element.getRootNode();
+      return node instanceof Document || node instanceof ShadowRoot ? node : null;
+    },
+  );
+  for (const landmark of landmarks) {
+    const role = semanticRole(landmark);
+    const name = labelFor(landmark, role, 0);
+    const node: SemanticNode = { role, name: name.text };
+    if (scopeRoot) {
+      const matches = read<Element[]>([], () =>
+        semanticMatches(scopeRoot as Document | ShadowRoot | Element, {
+          role,
+          name: name.text,
+        }),
+      );
+      const nth = matches.indexOf(landmark);
+      if (nth < 0) continue;
+      if (matches.length > 1) node.nth = nth;
+    }
+    nodes.push(node);
+    scopeRoot = landmark;
+  }
+  return nodes;
 }
 
 function locatorFor(record: ElementRecord, role: string, name?: string): Locator {
@@ -499,7 +535,7 @@ function descriptionFor(element: Element): string {
 }
 
 function controlInteraction(record: ElementRecord): Interaction {
-  const role = semanticRole(record.element) || "control";
+  const role = semanticRole(record.element) || GENERIC_ROLE;
   const label = labelFor(record.element, role, record.sourceOrder);
   const parameter = parameterFor(record.element, label, record.sourceOrder);
   const description = descriptionFor(record.element);
@@ -518,7 +554,7 @@ function controlInteraction(record: ElementRecord): Interaction {
 }
 
 function actionInteraction(record: ElementRecord): Interaction {
-  const role = semanticRole(record.element) || "button";
+  const role = semanticRole(record.element) || GENERIC_ROLE;
   const label = labelFor(record.element, role, record.sourceOrder);
   const description = descriptionFor(record.element);
   return {
@@ -550,6 +586,12 @@ function associatedForm(element: Element): HTMLFormElement | null {
   ) {
     return element.form;
   }
+  const formId = element.getAttribute("form");
+  if (formId) {
+    const root = element.getRootNode() as Document | ShadowRoot;
+    const found = typeof root.getElementById === "function" ? root.getElementById(formId) : null;
+    if (found instanceof HTMLFormElement) return found;
+  }
   return element.closest("form");
 }
 
@@ -574,7 +616,7 @@ function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): I
   const actions: Action[] = [];
 
   for (const record of controls) {
-    const controlRole = semanticRole(record.element) || "control";
+    const controlRole = semanticRole(record.element) || GENERIC_ROLE;
     const controlLabel = labelFor(record.element, controlRole, record.sourceOrder);
     const base = parameterName(controlLabel.text);
     const occurrence = (names.get(base) ?? 0) + 1;
@@ -588,7 +630,7 @@ function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): I
   for (const record of members.filter((member) => isAction(member.element))) {
     const effect = actionEffect(record.element);
     if (effect.class !== "submission") continue;
-    const actionRole = semanticRole(record.element) || "button";
+    const actionRole = semanticRole(record.element) || GENERIC_ROLE;
     const actionLabel = labelFor(record.element, actionRole, record.sourceOrder);
     locators.push(locatorFor(record, actionRole, locatorMatchName(actionLabel)));
     actions.push({
@@ -684,6 +726,7 @@ async function exploreSafely(
       exploration.details.add(element);
       element.open = true;
       await yieldToEventLoop();
+      if (performance.now() >= deadline) break;
     }
     return { exploration, restore };
   } catch (error) {
@@ -741,6 +784,7 @@ function disambiguateInteractions(interactions: Interaction[]): void {
 
 export async function extract(options?: ExtractionOptions): Promise<Batch> {
   const normalized = normalizeOptions(options);
+  const finishReads = beginReadAccounting();
   let records = traverse(document);
   const { exploration, restore } = await exploreSafely(records, normalized);
   try {
@@ -791,6 +835,7 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
     }
     disambiguateInteractions(interactions);
 
+    elementFailures += finishReads();
     const warnings: Warning[] = [];
     if (elementFailures > 0) {
       warnings.push({
@@ -806,6 +851,7 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
       warnings,
     };
   } finally {
+    finishReads();
     restore();
   }
 }

@@ -79,6 +79,19 @@ func TestWriteFilesRejectsEmptyPath(t *testing.T) {
 	}
 }
 
+func TestWriteFilesRejectsNilContext(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "artifact.json")
+	//lint:ignore SA1012 this test asserts WriteFiles rejects a nil context
+	err := WriteFiles(nil, []File{{Path: path, Data: []byte("new")}})
+	if err == nil {
+		t.Fatal("nil context unexpectedly succeeded")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("nil-context write created a file: %v", statErr)
+	}
+}
+
 func TestWriteFilesHonorsCanceledContext(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -174,6 +187,33 @@ func TestWriteFilesChmodFailureRollsBack(t *testing.T) {
 	}, ops)
 	if err == nil {
 		t.Fatal("chmod failure unexpectedly succeeded")
+	}
+	assertFileData(t, first, "old-first")
+	assertFileData(t, second, "old-second")
+}
+
+func TestWriteFilesSyncFailureRollsBackEarlierFiles(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	first := filepath.Join(directory, "first.json")
+	second := filepath.Join(directory, "second.json")
+	if err := os.WriteFile(first, []byte("old-first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("old-second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ops := productionOps()
+	ops.syncDir = func(string) error {
+		return errors.New("injected sync failure")
+	}
+	err := writeFiles(context.Background(), []File{
+		{Path: first, Data: []byte("new-first")},
+		{Path: second, Data: []byte("new-second")},
+	}, ops)
+	if err == nil {
+		t.Fatal("sync failure unexpectedly succeeded")
 	}
 	assertFileData(t, first, "old-first")
 	assertFileData(t, second, "old-second")

@@ -202,6 +202,31 @@ test("safe exploration distinguishes the operations cap from the depth cap", asy
   assert.equal(operationNames.includes("Deep"), false);
 });
 
+test("safe exploration stops after a yield that exhausts the time budget", async () => {
+  const html = `
+    <details><summary>One</summary><button>First</button></details>
+    <details><summary>Two</summary><button>Second</button></details>
+  `;
+  const dom = page(html, (window) => {
+    hideClosedDetailsContent(window);
+    window.document.querySelector("details").addEventListener("toggle", () => {
+      const start = window.performance.now();
+      while (window.performance.now() - start < 30) {
+        // Burn the exploration budget after the macrotask yield.
+      }
+    });
+  });
+  const batch = await dom.window.__GEOVISOR_EXTRACT__({
+    safeExplore: true,
+    maxDepth: 1,
+    maxOperations: 100,
+    timeoutMs: 5,
+  });
+  const names = interactions(batch, "action").map((action) => action.name);
+  assert.equal(names.includes("First"), true);
+  assert.equal(names.includes("Second"), false);
+});
+
 test("safe exploration enforces the time budget independently of operations", async () => {
   const html = `
     <details><summary>One</summary><button>First</button></details>
@@ -257,6 +282,28 @@ test("keeps duplicate names distinct within the same semantic scope", async () =
     Array.from(controls, (control) => control.scope.at(-1)?.name),
     ["Filters", "Filters", "Help"],
   );
+  assert.deepEqual(
+    Array.from(controls, (control) => control.locators[0].semantic.nth),
+    [0, 1, undefined],
+  );
+});
+
+test("records match ordinals on ambiguous semantic scopes", async () => {
+  const dom = page(`
+    <div role="region" aria-label="Panel"><input aria-label="Query"></div>
+    <div role="region" aria-label="Panel"><input aria-label="Query"></div>
+  `);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  const nodes = interactions(batch, "control").map(
+    (control) => control.locators[0].semantic.scope.at(-1),
+  );
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[0].role, "region");
+  assert.equal(nodes[0].name, "Panel");
+  assert.equal(nodes[0].nth, 0);
+  assert.equal(nodes[1].role, "region");
+  assert.equal(nodes[1].name, "Panel");
+  assert.equal(nodes[1].nth, 1);
 });
 
 test("never serializes current or hidden sensitive values", async () => {
@@ -372,6 +419,23 @@ test("emits form-owned controls only as form parameters", async () => {
 
 // A control associated with a form by the `form` attribute rather than by
 // containment is owned just as much, and is claimed the same way.
+test("claims contenteditable controls associated with a form by attribute", async () => {
+  const dom = page(`
+    <form id="notes" aria-label="Notes"></form>
+    <div contenteditable aria-label="Memo" form="notes"></div>
+  `);
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.deepEqual(
+    Array.from(interactions(batch, "form")[0].parameters, (parameter) => parameter.name),
+    ["memo"],
+  );
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    [],
+  );
+});
+
 test("claims controls associated with a form by attribute", async () => {
   const dom = page(`
     <form id="checkout" aria-label="Checkout"></form>
@@ -407,6 +471,20 @@ test("treats contenteditable as editable only when its value says so", async () 
 });
 
 // GV-030. A throw while building one interaction is isolated and counted.
+test("reports a warning when a suppressed DOM read fails", async () => {
+  const dom = page(`<input aria-label="Visible">`);
+  const input = dom.window.document.querySelector("input");
+  Object.defineProperty(input, "shadowRoot", {
+    configurable: true,
+    get() {
+      throw new Error("shadow probe failed");
+    },
+  });
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.equal(batch.warnings[0].code, "element_extraction_failed");
+  assert.equal(interactions(batch, "control")[0].name, "Visible");
+});
+
 test("reports a warning when an element cannot be extracted", async () => {
   const dom = page(`
     <input aria-label="Visible">

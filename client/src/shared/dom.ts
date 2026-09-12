@@ -15,8 +15,43 @@ const DOCUMENT_FRAGMENT_NODE = 11;
 /** Elements that can be named by a <label> element. */
 const LABELABLE = new Set(["input", "select", "textarea"]);
 
+type ReadFailureHook = () => void;
+
+let readFailureHook: ReadFailureHook | undefined;
+
+/**
+ * Counts `read` failures for the duration of `fn`, then restores the previous
+ * hook. Finder timeouts and other expected degradations should use
+ * `readExpected` so they are not counted as coverage gaps (GV-030).
+ */
+export function beginReadAccounting(): () => number {
+  let failures = 0;
+  let done = false;
+  const previous = readFailureHook;
+  readFailureHook = () => {
+    failures += 1;
+  };
+  return () => {
+    if (!done) {
+      done = true;
+      readFailureHook = previous;
+    }
+    return failures;
+  };
+}
+
 /** Swallows DOM access failures so one hostile element cannot end a traversal. */
 export function read<T>(fallback: T, operation: () => T): T {
+  try {
+    return operation();
+  } catch {
+    readFailureHook?.();
+    return fallback;
+  }
+}
+
+/** Like `read`, but the failure is an expected fallback, not a coverage gap. */
+export function readExpected<T>(fallback: T, operation: () => T): T {
   try {
     return operation();
   } catch {

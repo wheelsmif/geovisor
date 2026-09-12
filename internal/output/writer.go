@@ -1,6 +1,7 @@
 // Package output writes generated artifacts without exposing a mixed set of
-// old and new files. Each file is replaced atomically; if any replace fails,
-// already-replaced files in the same call are rolled back.
+// old and new files. Each file is replaced atomically. A replace, chmod, or
+// parent-directory sync failure restores destinations this call already
+// replaced.
 package output
 
 import (
@@ -52,9 +53,10 @@ func productionOps() fileOps {
 }
 
 // WriteFiles stages every artifact, then replaces each destination. A failure
-// during replace or chmod restores any destination this call already replaced.
-// Parent directories are synced after a successful replace so a crash cannot
-// lose the directory entry. Callers must finish all generation before calling.
+// during replace, chmod, or parent-directory sync restores any destination this
+// call already replaced. Parent directories are synced before backups are
+// discarded so a sync error does not leave new files behind an error return.
+// Callers must finish all generation before calling.
 func WriteFiles(ctx context.Context, files []File) error {
 	return writeFiles(ctx, files, productionOps())
 }
@@ -150,6 +152,11 @@ func writeFiles(ctx context.Context, files []File, ops fileOps) error {
 		}
 	}
 
+	for _, parent := range parents {
+		if err := ops.syncDir(parent); err != nil {
+			return fmt.Errorf("sync output directory %q: %w", parent, err)
+		}
+	}
 	for _, item := range replacements {
 		if item.backup != "" {
 			_ = os.Remove(item.backup)
@@ -157,11 +164,6 @@ func writeFiles(ctx context.Context, files []File, ops fileOps) error {
 	}
 	replacements = replacements[:0]
 	committed = true
-	for _, parent := range parents {
-		if err := ops.syncDir(parent); err != nil {
-			return fmt.Errorf("sync output directory %q: %w", parent, err)
-		}
-	}
 	return nil
 }
 

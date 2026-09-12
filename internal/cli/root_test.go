@@ -488,6 +488,68 @@ func TestUnknownCommandIsUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIStrictAppliesOnlyToOpenAIWhenEmittingAll(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	strict := map[emitter.Format]bool{}
+	dependencies := successfulDependencies()
+	dependencies.Registry = stubRegistry{emit: func(
+		_ context.Context,
+		format emitter.Format,
+		_ *tir.Document,
+		options emitter.Options,
+	) (emitter.Result, error) {
+		strict[format] = options.Strict
+		return emitter.Result{Primary: emitter.Artifact{
+			Name: "primary-" + string(format) + ".json", Data: []byte("ok"),
+		}}, nil
+	}}
+	var stderr bytes.Buffer
+	err := RunWithDependencies(context.Background(), []string{
+		"inspect", "https://example.test",
+		"--format", "all", "--output", directory, "--openai-strict",
+	}, &bytes.Buffer{}, &stderr, dependencies)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strict[emitter.FormatOpenAI] {
+		t.Fatal("OpenAI emit did not receive Strict")
+	}
+	if strict[emitter.FormatMCP] || strict[emitter.FormatWebMCP] || strict[emitter.FormatTIRJSON] {
+		t.Fatalf("Strict leaked to non-OpenAI formats: %#v", strict)
+	}
+	if !strings.Contains(stderr.String(), "--openai-strict applies only to the OpenAI artifact") {
+		t.Fatalf("stderr = %q, want openai-strict note", stderr.String())
+	}
+}
+
+func TestValidateDependenciesRejectsEachNilField(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		mutate func(*Dependencies)
+		want   string
+	}{
+		{name: "launch", mutate: func(d *Dependencies) { d.NewLaunch = nil }, want: "launch dependency"},
+		{name: "attach", mutate: func(d *Dependencies) { d.NewAttach = nil }, want: "attach dependency"},
+		{name: "compile", mutate: func(d *Dependencies) { d.Compile = nil }, want: "compiler dependency"},
+		{name: "registry", mutate: func(d *Dependencies) { d.Registry = nil }, want: "emitter registry"},
+		{name: "write files", mutate: func(d *Dependencies) { d.WriteFiles = nil }, want: "output dependency"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dependencies := successfulDependencies()
+			test.mutate(&dependencies)
+			err := validateDependencies(dependencies)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestExitGenericFallbackAndNilDependencies(t *testing.T) {
 	t.Parallel()
 	if got := ExitCode(errors.New("plain failure")); got != ExitGeneric {

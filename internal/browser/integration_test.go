@@ -213,6 +213,58 @@ func TestAttachPreservesBrowserAndDoesNotNavigate(t *testing.T) {
 	}
 }
 
+func TestLaunchNumbersShadowHostedFrameBeforeLightSibling(t *testing.T) {
+	executable := browserExecutable(t)
+	root := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/favicon.ico" {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Type", "text/html")
+		_, _ = writer.Write(corpusFixture(t, "shadow-frame.html"))
+	}))
+	defer root.Close()
+
+	source, err := NewLaunch(LaunchOptions{
+		URL: root.URL, ExecutablePath: executable, Timeout: 45 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new launch source: %v", err)
+	}
+	result, err := source.Observe(context.Background())
+	if err != nil {
+		t.Fatalf("observe launch: %v", err)
+	}
+	if len(result.Input.Batches) == 0 {
+		t.Fatal("observe returned no batches")
+	}
+
+	type framed struct {
+		name  string
+		index int
+	}
+	var queries []framed
+	for _, interaction := range result.Input.Batches[0].Interactions {
+		if interaction.Name != "Query" && interaction.Name != "Query (2)" {
+			continue
+		}
+		if len(interaction.FramePath) != 1 {
+			t.Fatalf("query %q frame path = %+v, want one node", interaction.Name, interaction.FramePath)
+		}
+		queries = append(queries, framed{name: interaction.Name, index: interaction.FramePath[0].Index})
+	}
+	if len(queries) != 2 {
+		t.Fatalf("shadow-hosted frame queries = %#v, want two", queries)
+	}
+	seen := map[int]bool{}
+	for _, query := range queries {
+		seen[query.index] = true
+	}
+	if !seen[0] || !seen[1] {
+		t.Fatalf("frame indexes = %#v, want 0 (shadow-hosted) and 1 (light sibling)", queries)
+	}
+}
+
 func browserExecutable(t *testing.T) string {
 	t.Helper()
 	executable, found := launcher.LookPath()

@@ -150,11 +150,62 @@ if (mode === "extract") {
     "utf8",
   );
   const dom = buildDOM();
-  dom.window.eval(bundle);
-  const batch = await dom.window.__GEOVISOR_EXTRACT__({ safeExplore: false });
-  process.stdout.write(`${JSON.stringify(batch)}\n`);
+  const batches = await extractFrameTree(dom.window.document, bundle);
+  process.stdout.write(`${JSON.stringify({ batches })}\n`);
 } else {
   process.stdout.write(`${JSON.stringify(await executeModule())}\n`);
+}
+
+function collectFrames(root) {
+  const frames = [];
+  visitTree(root, (element) => {
+    if (isFrame(element)) frames.push(element);
+  });
+  return frames;
+}
+
+function stampFramePath(batch, indexes) {
+  const refs = indexes.map((index) => ({ index }));
+  const nodes = indexes.map((index) => ({ semantic: { role: "iframe", nth: index } }));
+  for (const interaction of batch.interactions ?? []) {
+    interaction.framePath = refs;
+    for (const locator of interaction.locators ?? []) {
+      locator.framePath = nodes;
+    }
+  }
+  for (const warning of batch.warnings ?? []) {
+    if (!warning.framePath || warning.framePath.length === 0) {
+      warning.framePath = refs;
+    }
+  }
+}
+
+// Frame-local extraction plus the same path stamping the browser source applies
+// in augmentBatch / frameTraversalNodes: role iframe, addressed by ordinal.
+// That is the extract → compile → execute path GV-003's harness was missing.
+async function extractFrameTree(document, bundle) {
+  const batches = [];
+  const extractWindow = async (win) => {
+    if (typeof win.__GEOVISOR_EXTRACT__ !== "function") {
+      win.eval(bundle);
+    }
+    return win.__GEOVISOR_EXTRACT__({ safeExplore: false });
+  };
+  const walk = async (doc, indexes) => {
+    if (!doc?.defaultView) return;
+    const batch = await extractWindow(doc.defaultView);
+    stampFramePath(batch, indexes);
+    batches.push(batch);
+    const frames = collectFrames(doc);
+    for (let index = 0; index < frames.length; index += 1) {
+      const inner = frameContentDocument(frames[index]);
+      if (inner?.documentElement) {
+        await walk(inner, [...indexes, index]);
+      }
+    }
+  };
+  await walk(document, []);
+  return batches;
 }
 
 async function executeModule() {

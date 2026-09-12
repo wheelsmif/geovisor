@@ -60,15 +60,22 @@ func TestCompileCopiesObservationWarnings(t *testing.T) {
 	t.Parallel()
 
 	input := fixtureInput()
-	input.Batches[0].Warnings = []observation.Warning{{
-		Code:    observation.WarningElementExtractionFailed,
-		Message: "2 element(s) could not be extracted",
-	}}
+	input.Batches[0].Warnings = []observation.Warning{
+		{
+			Code:    observation.WarningElementExtractionFailed,
+			Message: "2 element(s) could not be extracted",
+		},
+		{
+			Code:    observation.WarningClosedShadowRoot,
+			Message: "closed shadow root was not readable",
+		},
+	}
 	document, err := Compile(context.Background(), input)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	assertWarning(t, document, observation.WarningElementExtractionFailed)
+	assertWarning(t, document, observation.WarningClosedShadowRoot)
 }
 
 func TestCompileDoesNotCollapseDistinctScopes(t *testing.T) {

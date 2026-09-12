@@ -138,6 +138,15 @@ func TestSanitizedErrorRedactsEndpointSecrets(t *testing.T) {
 	}
 }
 
+func TestSanitizeTextDoesNotShredShortQueryValues(t *testing.T) {
+	t.Parallel()
+	endpoint := "http://localhost:9222/?a=1&port=22"
+	message := "cannot attach to target on port 1 of 22 remaining sessions"
+	if got := sanitizeText(message, endpoint); got != message {
+		t.Fatalf("short query values shredded the message:\n got %q\nwant %q", got, message)
+	}
+}
+
 func TestSanitizeTextIgnoresQueryKeys(t *testing.T) {
 	t.Parallel()
 	endpoint := "http://localhost:9222/?a=1&user=bob"

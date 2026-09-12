@@ -12,7 +12,9 @@ go test ./...
 go vet ./...
 ```
 
-Use `GEOVISOR_REQUIRE_BROWSER=1 go test ./...` when Chromium integration is
+`./scripts/check.sh` and `./scripts/check.ps1` set `GEOVISOR_REQUIRE_NODE=1`
+after `npm` succeeds so the WebMCP round-trip harness cannot skip. Use
+`GEOVISOR_REQUIRE_BROWSER=1 go test ./...` when Chromium integration is
 required. On PowerShell:
 
 ```powershell
@@ -65,6 +67,12 @@ Run all local checks with `./scripts/check.sh` or
 `./scripts/check.ps1`. Add `--require-browser --security` on POSIX, or
 `-RequireBrowser -Security` on PowerShell, for Chromium-required tests and
 dependency scanning.
+
+CI does not run that exact script. The Quality matrix runs formatters, `go vet`,
+`staticcheck`, `npm` checks, and `go test ./...` (with Node required; Chromium
+required only on the Ubuntu Quality leg). `verify-release` and the six-archive
+checksums run in the Source cross-build job. Chromium-backed packages also run
+in the dedicated Browser job, which asserts `google-chrome --version` first.
 
 Create all six local platform archives with:
 

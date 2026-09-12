@@ -138,13 +138,26 @@ func TestWebMCPRuntimeResolvesAgainstOriginatingDOM(t *testing.T) {
 
 	// Every advertised tool must work against the DOM it was derived from. A
 	// tool that cannot resolve or apply is a tool a model will call and fail.
+	seen := make(map[int]string)
 	for _, tool := range report.Tools {
 		if tool.Error != "" {
 			t.Errorf("tool %q failed to execute: %s", tool.Name, tool.Error)
 			continue
 		}
-		if len(tool.resolved()) == 0 {
+		indexes := tool.resolved()
+		if len(indexes) == 0 {
 			t.Errorf("tool %q executed without resolving to any element", tool.Name)
+			continue
+		}
+		for _, index := range indexes {
+			if previous, exists := seen[index]; exists && previous != tool.Name {
+				// Distinct tools may share a submit button (form + standalone).
+				if toolSlug(tool.Name) == "save-profile" || toolSlug(previous) == "save-profile" {
+					continue
+				}
+				t.Errorf("tools %q and %q both resolved to element %d", previous, tool.Name, index)
+			}
+			seen[index] = tool.Name
 		}
 	}
 }
@@ -210,6 +223,10 @@ func TestWebMCPRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
 	for _, tool := range report.Tools {
 		if tool.Error != "" {
 			t.Errorf("tool %q cannot resolve semantically: %s", tool.Name, tool.Error)
+			continue
+		}
+		if len(tool.resolved()) == 0 {
+			t.Errorf("tool %q resolved semantically to no element", tool.Name)
 		}
 	}
 }
@@ -309,95 +326,135 @@ func TestWebMCPRuntimeResolvesIdenticalNamesToDistinctElements(t *testing.T) {
 // same role and name, so reaching the right input proves the frame path did the
 // work.
 func TestWebMCPRuntimeResolvesFramePathsToTheCorrectFrame(t *testing.T) {
-	const fixture = "testdata/corpus/frames.html"
-
-	_, report := runRoundTripBatches(
-		t,
-		fixture,
-		nil,
-		frameBatch(0, "Query one"),
-		frameBatch(1, "Query two"),
-	)
+	document, report := runRoundTrip(t, "testdata/corpus/frames.html", stripCSSFallbacks)
 
 	if report.ModuleError != "" {
 		t.Fatalf("emitted WebMCP module failed to load: %s", report.ModuleError)
 	}
-	first := report.bySlug(t, "query-one")
-	second := report.bySlug(t, "query-two")
-	for _, tool := range []roundTripToolOutcome{first, second} {
-		if tool.Error != "" {
-			t.Fatalf("tool %q failed to execute: %s", tool.Name, tool.Error)
-		}
-		if got := len(tool.resolved()); got != 1 {
-			t.Fatalf("tool %q resolved to %d elements, want exactly 1", tool.Name, got)
-		}
+
+	type framed struct {
+		nth   int
+		name  string
+		index int
 	}
-	if first.resolved()[0] == second.resolved()[0] {
+	var resolved []framed
+	for _, tool := range document.Tools {
+		nth := framePathNth(t, tool)
+		outcome := report.byName(t, tool.ID)
+		if outcome.Error != "" {
+			t.Fatalf("tool %q failed to execute: %s", tool.ID, outcome.Error)
+		}
+		indexes := outcome.resolved()
+		if len(indexes) != 1 {
+			t.Fatalf("tool %q resolved to %d elements, want exactly 1", tool.ID, len(indexes))
+		}
+		resolved = append(resolved, framed{nth: nth, name: tool.ID, index: indexes[0]})
+	}
+	if len(resolved) != 2 {
+		t.Fatalf("want two framed tools, got %d: %s", len(resolved), strings.Join(report.toolNames(), ", "))
+	}
+	if resolved[0].index == resolved[1].index {
 		t.Fatalf(
 			"tools %q and %q both resolved to element %d; the frame path is not selecting the frame",
-			first.Name, second.Name, first.resolved()[0],
+			resolved[0].name, resolved[1].name, resolved[0].index,
 		)
 	}
-	// Element indexes are assigned in document order with each frame's contents
-	// following its frame element, so the frame with the lower index holds the
-	// earlier element. Frame 0's tool must reach the earlier input.
-	if first.resolved()[0] > second.resolved()[0] {
+	sort.Slice(resolved, func(i, j int) bool { return resolved[i].nth < resolved[j].nth })
+	if resolved[0].nth != 0 || resolved[1].nth != 1 {
+		t.Fatalf("frame ordinals = %d, %d; want 0 and 1", resolved[0].nth, resolved[1].nth)
+	}
+	if resolved[0].index > resolved[1].index {
 		t.Errorf(
-			"tool %q reached element %d and %q reached element %d; frame order is inverted",
-			first.Name, first.resolved()[0], second.Name, second.resolved()[0],
+			"frame 0 reached element %d and frame 1 reached element %d; frame order is inverted",
+			resolved[0].index, resolved[1].index,
 		)
 	}
 }
 
-// frameBatch builds the observation a browser source would report for a control
-// inside the frame at `index` of the top document.
-//
-// The frame path node shape is the contract asserted by
-// TestFrameTraversalNodesAddressFramesByIndexAlone in internal/browser: role
-// only, addressed by ordinal, with no name and no CSS fallback.
-func frameBatch(index int, name string) observation.Batch {
-	order := 0
-	return observation.Batch{
-		CoverageReported: true,
-		Frames:           []observation.Frame{},
-		Interactions: []observation.Interaction{
-			{
-				Kind:      observation.InteractionControl,
-				FramePath: []observation.FrameReference{{Index: index}},
-				Scope:     []observation.SemanticNode{},
-				Role:      "textbox",
-				Name:      name,
-				Parameters: []observation.Parameter{
-					{Name: "query", Type: observation.ValueString, SourceOrder: &order},
-				},
-				Locators: []observation.Locator{
-					{
-						FramePath: []observation.PathNode{
-							{Semantic: &observation.SemanticNode{Role: "iframe", Nth: index}},
-						},
-						Semantic: &observation.SemanticLocator{Role: "textbox", Name: "Query"},
-						Evidence: []observation.Evidence{
-							{Kind: observation.EvidenceAccessibility, Reference: "semantic:textbox", Score: 0.9},
-						},
-					},
-				},
-				Actions: []observation.Action{
-					{
-						Kind:           observation.ActionFill,
-						InputParameter: "query",
-						LocatorIndexes: []int{0},
-						SideEffect: observation.SideEffect{
-							Class:     observation.SideEffectUnknown,
-							Rationale: "Changing a control may invoke page handlers.",
-						},
-					},
-				},
-				Evidence: []observation.Evidence{
-					{Kind: observation.EvidenceAccessibility, Reference: "name:aria-label", Score: 0.96},
-				},
-			},
-		},
+func TestWebMCPRuntimeResolvesAmbiguousScopesToDistinctElements(t *testing.T) {
+	fixture := writeRoundTripFixture(t, `<!doctype html>
+<html lang="en"><body>
+  <div role="region" aria-label="Panel"><input aria-label="Query"></div>
+  <div role="region" aria-label="Panel"><input aria-label="Query"></div>
+</body></html>`)
+	_, report := runRoundTrip(t, fixture, stripCSSFallbacks)
+	var indexes []int
+	for _, tool := range report.Tools {
+		if !strings.HasPrefix(toolSlug(tool.Name), "query") {
+			continue
+		}
+		if tool.Error != "" {
+			t.Fatalf("query tool %q failed: %s", tool.Name, tool.Error)
+		}
+		got := tool.resolved()
+		if len(got) != 1 {
+			t.Fatalf("query tool %q resolved to %d elements", tool.Name, len(got))
+		}
+		indexes = append(indexes, got[0])
 	}
+	if len(indexes) != 2 || indexes[0] == indexes[1] {
+		t.Fatalf("ambiguous scopes resolved to %v; want two distinct elements", indexes)
+	}
+}
+
+func TestExtractCompileIDsStableWhenUnrelatedElementInserted(t *testing.T) {
+	baselineHTML := `<!doctype html><html lang="en"><body><input><button>Go</button></body></html>`
+	shiftedHTML := `<!doctype html><html lang="en"><body><div id="pad"></div><input><button>Go</button></body></html>`
+	baseline := compileExtracted(t, writeRoundTripFixture(t, baselineHTML))
+	shifted := compileExtracted(t, writeRoundTripFixture(t, shiftedHTML))
+	baselineID := toolIDByName(t, baseline, "Go")
+	shiftedID := toolIDByName(t, shifted, "Go")
+	if baselineID != shiftedID {
+		t.Fatalf("unrelated earlier element changed tool ID from %q to %q", baselineID, shiftedID)
+	}
+}
+
+func framePathNth(t *testing.T, tool tir.Tool) int {
+	t.Helper()
+	for _, locator := range tool.Locators {
+		if len(locator.FramePath) == 1 && locator.FramePath[0].Semantic != nil {
+			return locator.FramePath[0].Semantic.Nth
+		}
+	}
+	t.Fatalf("tool %q has no single-node frame path", tool.ID)
+	return 0
+}
+
+func (report roundTripReport) byName(t *testing.T, name string) roundTripToolOutcome {
+	t.Helper()
+	for _, tool := range report.Tools {
+		if tool.Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("tool %q not registered; have %s", name, strings.Join(report.toolNames(), ", "))
+	return roundTripToolOutcome{}
+}
+
+func compileExtracted(t *testing.T, fixture string) *tir.Document {
+	t.Helper()
+	document, _ := runRoundTrip(t, fixture, nil)
+	return document
+}
+
+func toolIDByName(t *testing.T, document *tir.Document, name string) string {
+	t.Helper()
+	for _, tool := range document.Tools {
+		if tool.Name == name {
+			return tool.ID
+		}
+	}
+	t.Fatalf("tool named %q not found", name)
+	return ""
+}
+
+func writeRoundTripFixture(t *testing.T, html string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fixture.html")
+	if err := os.WriteFile(path, []byte(html), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // stripCSSFallbacks removes every CSS strategy that a semantic strategy can
@@ -433,14 +490,14 @@ func runRoundTrip(
 	root := repositoryRoot(t)
 	node := requireNodeForRoundTrip(t)
 	declareRoundTripInputs(t, root, fixture)
-	batch := extractForRoundTrip(t, node, root, fixture)
-	return runRoundTripBatches(t, fixture, transform, batch)
+	batches := extractBatchesForRoundTrip(t, node, root, fixture)
+	return runRoundTripBatches(t, fixture, transform, batches...)
 }
 
 // runRoundTripBatches compiles supplied observation batches, emits WebMCP, and
-// executes the module against the fixture. Tests that need observations the
-// frame-local extractor cannot produce on its own -- notably multi-frame
-// coverage, which a browser source assembles -- build the batches themselves.
+// executes the module against the fixture. The extract driver now stamps frame
+// paths the same way the browser source does, so multi-frame fixtures go
+// through extract → compile → execute rather than a hand-built batch.
 func runRoundTripBatches(
 	t *testing.T,
 	fixture string,
@@ -489,14 +546,19 @@ func runRoundTripBatches(
 	return document, report
 }
 
-func extractForRoundTrip(t *testing.T, node, root, fixture string) observation.Batch {
+func extractBatchesForRoundTrip(t *testing.T, node, root, fixture string) []observation.Batch {
 	t.Helper()
-	var batch observation.Batch
-	output := runDriver(t, node, root, "extract", fixture)
-	if err := json.Unmarshal(output, &batch); err != nil {
-		t.Fatalf("decode extracted batch for %s: %v", fixture, err)
+	var report struct {
+		Batches []observation.Batch `json:"batches"`
 	}
-	return batch
+	output := runDriver(t, node, root, "extract", fixture)
+	if err := json.Unmarshal(output, &report); err != nil {
+		t.Fatalf("decode extracted batches for %s: %v", fixture, err)
+	}
+	if len(report.Batches) == 0 {
+		t.Fatalf("extract produced no batches for %s", fixture)
+	}
+	return report.Batches
 }
 
 func runDriver(t *testing.T, node, root string, arguments ...string) []byte {
@@ -514,10 +576,17 @@ func runDriver(t *testing.T, node, root string, arguments ...string) []byte {
 
 func declareRoundTripInputs(t *testing.T, root, fixture string) {
 	t.Helper()
-	for _, name := range append([]string{fixture}, roundTripInputs...) {
+	for _, name := range roundTripInputs {
 		if _, err := os.ReadFile(filepath.Join(root, name)); err != nil {
 			t.Fatalf("round-trip input %s: %v", name, err)
 		}
+	}
+	path := fixture
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, fixture)
+	}
+	if _, err := os.ReadFile(path); err != nil {
+		t.Fatalf("round-trip fixture %s: %v", fixture, err)
 	}
 }
 
@@ -525,8 +594,8 @@ func requireNodeForRoundTrip(t *testing.T) string {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
-		if os.Getenv("GEOVISOR_REQUIRE_BROWSER") == "1" {
-			t.Fatal("GEOVISOR_REQUIRE_BROWSER=1 but Node.js is unavailable for the WebMCP round-trip harness")
+		if os.Getenv("GEOVISOR_REQUIRE_NODE") == "1" || os.Getenv("GEOVISOR_REQUIRE_BROWSER") == "1" {
+			t.Fatal("Node.js is required to execute the generated WebMCP runtime")
 		}
 		t.Skip("Node.js is required to execute the generated WebMCP runtime")
 	}

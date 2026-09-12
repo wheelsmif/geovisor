@@ -11,9 +11,13 @@ try {
     $version = "v0.0.0-test"
     $ldflags = "-buildid= -X github.com/wheelsmif/geovisor/internal/version.Version=$version"
 
-    go build -trimpath -buildvcs=false -ldflags $ldflags -o (Join-Path $work "geovisor-a.exe") ./cmd/geovisor
-    go build -trimpath -buildvcs=false -ldflags $ldflags -o (Join-Path $work "geovisor-b.exe") ./cmd/geovisor
-    go build -trimpath -buildvcs=false -ldflags $ldflags -o (Join-Path $work "gv.exe") ./cmd/geovisor
+    function Invoke-GoBuild([string]$Output) {
+        go build -trimpath -buildvcs=false -ldflags $ldflags -o $Output ./cmd/geovisor
+        if ($LASTEXITCODE -ne 0) { throw "go build failed ($LASTEXITCODE): $Output" }
+    }
+    Invoke-GoBuild (Join-Path $work "geovisor-a.exe")
+    Invoke-GoBuild (Join-Path $work "geovisor-b.exe")
+    Invoke-GoBuild (Join-Path $work "gv.exe")
 
     $first = (Get-FileHash -Algorithm SHA256 (Join-Path $work "geovisor-a.exe")).Hash
     $second = (Get-FileHash -Algorithm SHA256 (Join-Path $work "geovisor-b.exe")).Hash
