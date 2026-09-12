@@ -8,8 +8,8 @@
 // Every source here is recomputable from the element alone, which is what makes
 // a recorded name a usable match key. The extractor's positional fallback
 // ("Textbox 3") is deliberately *not* part of this function: it depends on a
-// document-wide traversal counter the runtime cannot know, so it is a display
-// name only and never a match key.
+// document-wide traversal counter the runtime cannot know, so it is a
+// parameter-name hint only and never a match key or tool identity (GV-018).
 
 import { cleanText, humanize } from "./text";
 import {

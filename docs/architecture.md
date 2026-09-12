@@ -39,9 +39,11 @@ Human-readable help, version output, and diagnostics use standard error.
 ## Contract invariants
 
 Canonical DTOs use ordered slices instead of maps. `NewDocument` and
-`Document.Normalize` ensure non-null collections. `Document.Validate` enforces
-invariants that JSON Schema cannot represent, including explicit partial frame
-coverage and the prohibition on safe exploration of navigation, submission,
-or unknown.
+`Document.Normalize` ensure non-null collections. `Document.Validate` and
+`schemas/tir.schema.json` share the same contract: type-consistent parameter
+shapes, tool IDs that match `^[A-Za-z0-9_-]{1,64}$`, unambiguous length-prefixed
+frame-path keys, explicit partial frame coverage, and the prohibition on safe
+exploration of navigation, submission, or unknown. A document that passes validation emits on every registered format, except
+that WebMCP still requires each executable action to name a locator.
 
 See `docs/adr` for the decisions that establish these boundaries.

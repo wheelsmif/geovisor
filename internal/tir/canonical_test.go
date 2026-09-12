@@ -105,6 +105,47 @@ func TestValidateContractInvariants(t *testing.T) {
 			code: "invalid_value_type",
 		},
 		{
+			name: "array missing items",
+			mutate: func(document *Document) {
+				document.Tools[0].Parameters[0].Type = ValueArray
+			},
+			code: "incompatible_shape",
+		},
+		{
+			name: "object carrying enum",
+			mutate: func(document *Document) {
+				document.Tools[0].Parameters = []Parameter{{
+					Name: "options", Type: ValueObject, Enum: []string{"a"},
+				}}
+			},
+			code: "incompatible_shape",
+		},
+		{
+			name: "string carrying properties",
+			mutate: func(document *Document) {
+				document.Tools[0].Parameters[0].Properties = []ParameterProperty{{
+					Name: "nested", Shape: ParameterShape{Type: ValueString},
+				}}
+			},
+			code: "incompatible_shape",
+		},
+		{
+			name: "primitive carrying enum",
+			mutate: func(document *Document) {
+				document.Tools[0].Parameters = []Parameter{{
+					Name: "flag", Type: ValueBoolean, Enum: []string{"true"},
+				}}
+			},
+			code: "incompatible_shape",
+		},
+		{
+			name: "invalid tool id",
+			mutate: func(document *Document) {
+				document.Tools[0].ID = "invalid name"
+			},
+			code: "invalid_tool_id",
+		},
+		{
 			name: "duplicate locator id",
 			mutate: func(document *Document) {
 				duplicate := document.Tools[0]
@@ -171,6 +212,35 @@ func TestValidateContractInvariants(t *testing.T) {
 				t.Fatalf("error = %T %v, want ValidationError %q", err, err, test.code)
 			}
 		})
+	}
+}
+
+func TestFramePathKeyIsUnambiguousAndNumeric(t *testing.T) {
+	t.Parallel()
+
+	left := []FrameReference{{Index: 0, Name: "a:b", Src: "c"}}
+	right := []FrameReference{{Index: 0, Name: "a", Src: "b:c"}}
+	if framePathKey(left) == framePathKey(right) {
+		t.Fatal("page-controlled name and src must not collide through delimiters")
+	}
+
+	document := validDocument()
+	document.FrameCoverage.Frames = []CoveredFrame{
+		{Path: []FrameReference{{Index: 10, Name: "later"}}},
+		{Path: []FrameReference{{Index: 2, Name: "earlier"}}},
+	}
+	canonicalize(document)
+	if document.FrameCoverage.Frames[0].Path[0].Index != 2 {
+		t.Fatalf("index order = %d, want 2 before 10", document.FrameCoverage.Frames[0].Path[0].Index)
+	}
+
+	distinct := validDocument()
+	distinct.FrameCoverage.Frames = []CoveredFrame{
+		{Path: []FrameReference{{Index: 0, Name: "a:b", Src: "c"}}},
+		{Path: []FrameReference{{Index: 0, Name: "a", Src: "b:c"}}},
+	}
+	if err := distinct.Validate(); err != nil {
+		t.Fatalf("distinct delimiter-bearing paths must not collide: %v", err)
 	}
 }
 

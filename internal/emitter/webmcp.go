@@ -47,7 +47,7 @@ type webMCPAnnotations struct {
 func (WebMCP) Emit(
 	ctx context.Context,
 	document *tir.Document,
-	_ Options,
+	options Options,
 ) (Result, error) {
 	canonical, err := canonicalDocument(ctx, FormatWebMCP, document)
 	if err != nil {
@@ -69,7 +69,7 @@ func (WebMCP) Emit(
 				)
 			}
 		}
-		inputSchema, err := toolInputSchema(ctx, FormatWebMCP, tool, false)
+		inputSchema, err := toolInputSchema(ctx, FormatWebMCP, tool, options.Strict)
 		if err != nil {
 			return Result{}, err
 		}

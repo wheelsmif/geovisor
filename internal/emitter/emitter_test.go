@@ -303,7 +303,7 @@ func TestTypedErrors(t *testing.T) {
 				tool.Parameters[0].Type = tir.ValueArray
 				tool.Parameters[0].Enum = []string{}
 			},
-			code: CodeUnsupportedShape,
+			code: CodeInvalidDocument,
 		},
 		{
 			name:    "primitive properties",
@@ -314,7 +314,7 @@ func TestTypedErrors(t *testing.T) {
 					Name: "bad", Shape: tir.ParameterShape{Type: tir.ValueString},
 				}}
 			},
-			code: CodeUnsupportedShape,
+			code: CodeInvalidDocument,
 		},
 		{
 			name:    "duplicate nested property",
@@ -335,12 +335,12 @@ func TestTypedErrors(t *testing.T) {
 			code: CodeInvalidDocument,
 		},
 		{
-			name:    "invalid OpenAI name",
+			name:    "invalid tool id",
 			emitter: OpenAI{},
 			mutate: func(document *tir.Document) {
 				document.Tools[0].ID = "invalid name"
 			},
-			code: CodeInvalidName,
+			code: CodeInvalidDocument,
 		},
 		{
 			name:    "WebMCP action without locator",
@@ -363,6 +363,33 @@ func TestTypedErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidDocumentEmitsOnEveryFormat(t *testing.T) {
+	t.Parallel()
+
+	registry := DefaultRegistry()
+	for _, format := range registry.Formats() {
+		if _, err := registry.Emit(context.Background(), format, fixtureDocument(), Options{Strict: true}); err != nil {
+			t.Fatalf("emit %s: %v", format, err)
+		}
+	}
+}
+
+func TestMCPAndWebMCPHonorStrict(t *testing.T) {
+	t.Parallel()
+
+	nonStrictMCP := emitMCPTools(t, false)
+	strictMCP := emitMCPTools(t, true)
+	nonStrictSchema := findMCPTool(t, nonStrictMCP, "complex_tool")["inputSchema"].(map[string]any)
+	strictSchema := findMCPTool(t, strictMCP, "complex_tool")["inputSchema"].(map[string]any)
+	assertStrings(t, nonStrictSchema["required"], []string{"query"})
+	assertStrings(t, strictSchema["required"], []string{"query", "options"})
+
+	nonStrictWebMCP := emitWebMCPDefinitions(t, false)
+	strictWebMCP := emitWebMCPDefinitions(t, true)
+	assertStrings(t, findWebMCPTool(t, nonStrictWebMCP, "complex_tool")["inputSchema"].(map[string]any)["required"], []string{"query"})
+	assertStrings(t, findWebMCPTool(t, strictWebMCP, "complex_tool")["inputSchema"].(map[string]any)["required"], []string{"query", "options"})
 }
 
 func TestCanceledContext(t *testing.T) {
@@ -398,6 +425,66 @@ func TestEmitterSchemasUseJSONSchema202012(t *testing.T) {
 			t.Fatalf("%s dialect = %#v", name, schema["$schema"])
 		}
 	}
+}
+
+func emitMCPTools(t *testing.T, strict bool) []map[string]any {
+	t.Helper()
+	result, err := (MCP{}).Emit(context.Background(), fixtureDocument(), Options{Strict: strict})
+	if err != nil {
+		t.Fatalf("emit MCP: %v", err)
+	}
+	var manifest struct {
+		Tools []map[string]any `json:"tools"`
+	}
+	if err := json.Unmarshal(result.Primary.Data, &manifest); err != nil {
+		t.Fatalf("decode MCP: %v", err)
+	}
+	return manifest.Tools
+}
+
+func findMCPTool(t *testing.T, tools []map[string]any, name string) map[string]any {
+	t.Helper()
+	for _, tool := range tools {
+		if tool["name"] == name {
+			return tool
+		}
+	}
+	t.Fatalf("MCP tool %q not found", name)
+	return nil
+}
+
+func emitWebMCPDefinitions(t *testing.T, strict bool) []map[string]any {
+	t.Helper()
+	result, err := (WebMCP{}).Emit(context.Background(), fixtureDocument(), Options{Strict: strict})
+	if err != nil {
+		t.Fatalf("emit WebMCP: %v", err)
+	}
+	prefix := []byte("const __geovisorDefinitions = ")
+	start := bytes.Index(result.Primary.Data, prefix)
+	if start < 0 {
+		t.Fatal("WebMCP module is missing definitions")
+	}
+	start += len(prefix)
+	end := bytes.Index(result.Primary.Data[start:], []byte(";\n"))
+	if end < 0 {
+		t.Fatal("WebMCP definitions are not terminated")
+	}
+	var definitions []map[string]any
+	if err := json.Unmarshal(result.Primary.Data[start:start+end], &definitions); err != nil {
+		t.Fatalf("decode WebMCP definitions: %v", err)
+	}
+	return definitions
+}
+
+func findWebMCPTool(t *testing.T, tools []map[string]any, name string) map[string]any {
+	t.Helper()
+	for _, tool := range tools {
+		if tool["name"] == name {
+			return tool
+		}
+	}
+	t.Fatalf("WebMCP tool %q not found", name)
+	return nil
 }
 
 func emitOpenAITools(t *testing.T, strict bool) []map[string]any {

@@ -16,9 +16,9 @@ Non-strict mode preserves the TIR required list exactly, so optional properties
 may be omitted. Strict mode follows the current Structured Outputs
 constraints: every property at every object level is listed in `required`,
 every object sets `additionalProperties` to `false`, and originally optional
-properties add `null` to their `type`. Shapes that cannot be represented by
-the supported subset are rejected with a typed error rather than weakened.
-Function names must match `^[A-Za-z0-9_-]+$` and contain at most 64 characters.
+properties add `null` to their `type`. Shape and identifier constraints live
+on TIR, so a valid document always emits; the OpenAI emitter still checks the
+same function-name pattern as defense in depth.
 
 The standard function definitions contain no browser bindings or GEO-Visor
 extensions. Structured locator and action recipes are written separately as

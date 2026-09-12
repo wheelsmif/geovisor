@@ -45,9 +45,12 @@ unsafe. `timeoutMs` is a real deadline across that async work.
 
 The extractor never reads current control values. Hidden inputs are skipped,
 password fields are represented structurally, and select enums use visible
-option labels rather than option values. Element-level extraction failures
-are counted as batch warnings. Closed shadow roots are invisible to page
-JavaScript and are reported by the browser source via CDP.
+option labels rather than option values. A positional fallback name is a
+parameter-name hint only: it is not written into the interaction name or the
+semantic locator, so inserting an unrelated earlier element does not change
+unaffected tool IDs. Element-level extraction failures are counted as batch
+warnings. Closed shadow roots are invisible to page JavaScript and are
+reported by the browser source via CDP.
 
 ## WebMCP runtime
 

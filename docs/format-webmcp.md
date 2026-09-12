@@ -31,7 +31,9 @@ It supports click, fill, select, and check bindings, checks cancellation between
 actions, and reports the tool, action index, action kind, and locator failures
 when execution fails. Cross-origin frame DOM access and closed shadow roots
 cannot be bypassed by page JavaScript; bindings that encounter either boundary
-fail explicitly. The emitter also rejects actions with no locator candidate.
+fail explicitly. The emitter honors `Options.Strict` on each tool's `inputSchema` the same way
+as the other schema-emitting lanes. It still rejects actions with no locator
+candidate, because those cannot be executed in page JavaScript.
 
 WebMCP annotations use the Chrome 153 names. `readOnlyHint` is true only when
 all actions have side effect `none`; `consequentialHint` is true for network,

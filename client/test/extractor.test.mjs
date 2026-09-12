@@ -219,6 +219,27 @@ test("safe exploration enforces the time budget independently of operations", as
   );
 });
 
+// GV-018. A document-wide traversal index in the fallback name would shift
+// every downstream tool ID when an unrelated earlier element is inserted.
+test("positional fallback names do not enter identity or locators", async () => {
+  const extractUnnamed = async (prefix) => {
+    const batch = await page(`${prefix}<input><button>Go</button>`).window.__GEOVISOR_EXTRACT__();
+    return {
+      control: interactions(batch, "control")[0],
+      action: interactions(batch, "action").find((item) => item.name === "Go"),
+    };
+  };
+
+  const baseline = await extractUnnamed("");
+  const shifted = await extractUnnamed('<div id="pad"></div>');
+  assert.equal(baseline.control.name, "");
+  assert.equal(shifted.control.name, "");
+  assert.equal(baseline.control.locators[0].semantic.name, undefined);
+  assert.equal(shifted.control.locators[0].semantic.name, undefined);
+  assert.equal(baseline.control.locators[0].semantic.nth, shifted.control.locators[0].semantic.nth);
+  assert.equal(baseline.action.name, shifted.action.name);
+});
+
 test("keeps duplicate names distinct within the same semantic scope", async () => {
   const dom = page(`
     <section role="region" aria-label="Filters">

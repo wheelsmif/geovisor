@@ -39,7 +39,7 @@ type mcpAnnotations struct {
 func (MCP) Emit(
 	ctx context.Context,
 	document *tir.Document,
-	_ Options,
+	options Options,
 ) (Result, error) {
 	canonical, err := canonicalDocument(ctx, FormatMCP, document)
 	if err != nil {
@@ -51,7 +51,7 @@ func (MCP) Emit(
 			return Result{}, err
 		}
 		tool := &canonical.Tools[i]
-		inputSchema, err := toolInputSchema(ctx, FormatMCP, tool, false)
+		inputSchema, err := toolInputSchema(ctx, FormatMCP, tool, options.Strict)
 		if err != nil {
 			return Result{}, err
 		}

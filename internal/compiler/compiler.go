@@ -93,6 +93,9 @@ type compiledTool struct {
 // evidence is deduplicated, while frame path and semantic scope remain part of
 // interaction identity.
 func Compile(input Input) (*tir.Document, error) {
+	if err := validateSourceKind("source.kind", input.Source.Kind); err != nil {
+		return nil, err
+	}
 	document := tir.NewDocument(tir.SourceMetadata{
 		Kind:              tir.SourceKind(input.Source.Kind),
 		ExecutionBoundary: tir.ExecutionAgentOwned,
@@ -280,7 +283,10 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 	}
 
 	for i, parameter := range source.Parameters {
-		compiled := compileParameter(parameter)
+		compiled, err := compileParameter(fmt.Sprintf("%s.parameters[%d]", field, i), parameter)
+		if err != nil {
+			return result, nil, err
+		}
 		if compiled.Name == "" {
 			return result, nil, &Error{
 				Field: fmt.Sprintf("%s.parameters[%d].name", field, i), Code: "required",
@@ -297,6 +303,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 	}
 
 	locatorKeys := make([]string, len(source.Locators))
+	identityLocatorKeys := make([]string, len(source.Locators))
 	for i, locator := range source.Locators {
 		compiled, evidence, err := compileLocator(fmt.Sprintf("%s.locators[%d]", field, i), locator)
 		if err != nil {
@@ -310,6 +317,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 		}{compiled.FramePath, compiled.ShadowPath, compiled.Semantic, compiled.CSSFallback})
 		key := string(data)
 		locatorKeys[i] = key
+		identityLocatorKeys[i] = locatorIdentityKey(compiled)
 		result.locators = append(result.locators, preparedLocator{key: key, value: compiled, evidence: evidence})
 		if compiled.Semantic == nil && compiled.CSSFallback != "" {
 			warnings = append(warnings, pendingWarning{
@@ -326,6 +334,13 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 	}
 
 	for i, action := range source.Actions {
+		actionField := fmt.Sprintf("%s.actions[%d]", field, i)
+		if err := validateActionKind(actionField+".kind", action.Kind); err != nil {
+			return result, nil, err
+		}
+		if err := validateSideEffect(actionField+".sideEffect", action.SideEffect); err != nil {
+			return result, nil, err
+		}
 		selected := make([]string, 0, len(action.LocatorIndexes))
 		if len(action.LocatorIndexes) == 0 {
 			selected = append(selected, locatorKeys...)
@@ -333,7 +348,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 			for j, index := range action.LocatorIndexes {
 				if index < 0 || index >= len(locatorKeys) {
 					return result, nil, &Error{
-						Field: fmt.Sprintf("%s.actions[%d].locatorIndexes[%d]", field, i, j),
+						Field: fmt.Sprintf("%s.locatorIndexes[%d]", actionField, j),
 						Code:  "invalid_locator_index", Message: "must reference a locator in the same interaction",
 					}
 				}
@@ -366,7 +381,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 		semanticNodesKey(scope), result.role, canonicalText(name),
 	}
 	if cleanText(source.Name) == "" {
-		keys := append([]string(nil), locatorKeys...)
+		keys := append([]string(nil), identityLocatorKeys...)
 		sort.Strings(keys)
 		identityParts = append(identityParts, strings.Join(keys, "\x1e"))
 	}
@@ -533,7 +548,8 @@ func compileActions(accumulator *toolAccumulator, toolID string, locators []tir.
 		item.action.SideEffect.Class = mostConservativeClass(item.classes)
 		item.action.SideEffect.SafeForExploration = item.allSafe &&
 			item.action.SideEffect.Class != tir.SideEffectNavigation &&
-			item.action.SideEffect.Class != tir.SideEffectSubmission
+			item.action.SideEffect.Class != tir.SideEffectSubmission &&
+			item.action.SideEffect.Class != tir.SideEffectUnknown
 		item.action.SideEffect.Rationale = chooseDescription(item.rationales)
 		if len(item.classes) > 1 {
 			*warnings = append(*warnings, pendingWarning{
@@ -618,43 +634,67 @@ func compileWarnings(source []pendingWarning, toolIDs map[string]string) []tir.W
 	return result
 }
 
-func compileParameter(source observation.Parameter) tir.Parameter {
+func compileParameter(field string, source observation.Parameter) (tir.Parameter, error) {
+	if err := validateValueType(field+".type", source.Type); err != nil {
+		return tir.Parameter{}, err
+	}
 	result := tir.Parameter{
 		Name: cleanText(source.Name), Description: cleanText(source.Description),
 		Type: tir.ValueType(source.Type), Required: source.Required,
 		Enum: sortedUniqueStrings(cleanStrings(source.Enum)),
 	}
 	if source.Items != nil {
-		items := compileShape(*source.Items)
+		items, err := compileShape(field+".items", *source.Items)
+		if err != nil {
+			return tir.Parameter{}, err
+		}
 		result.Items = &items
 	}
-	result.Properties = compileProperties(source.Properties)
-	return result
+	properties, err := compileProperties(field+".properties", source.Properties)
+	if err != nil {
+		return tir.Parameter{}, err
+	}
+	result.Properties = properties
+	return result, nil
 }
 
-func compileShape(source observation.ParameterShape) tir.ParameterShape {
+func compileShape(field string, source observation.ParameterShape) (tir.ParameterShape, error) {
+	if err := validateValueType(field+".type", source.Type); err != nil {
+		return tir.ParameterShape{}, err
+	}
 	result := tir.ParameterShape{
 		Type: tir.ValueType(source.Type), Enum: sortedUniqueStrings(cleanStrings(source.Enum)),
 	}
 	if source.Items != nil {
-		items := compileShape(*source.Items)
+		items, err := compileShape(field+".items", *source.Items)
+		if err != nil {
+			return tir.ParameterShape{}, err
+		}
 		result.Items = &items
 	}
-	result.Properties = compileProperties(source.Properties)
-	return result
+	properties, err := compileProperties(field+".properties", source.Properties)
+	if err != nil {
+		return tir.ParameterShape{}, err
+	}
+	result.Properties = properties
+	return result, nil
 }
 
-func compileProperties(source []observation.ParameterProperty) []tir.ParameterProperty {
+func compileProperties(field string, source []observation.ParameterProperty) ([]tir.ParameterProperty, error) {
 	type ordered struct {
 		value    tir.ParameterProperty
 		order    int
 		hasOrder bool
 	}
 	values := make([]ordered, 0, len(source))
-	for _, property := range source {
+	for i, property := range source {
+		shape, err := compileShape(fmt.Sprintf("%s[%d].shape", field, i), property.Shape)
+		if err != nil {
+			return nil, err
+		}
 		item := ordered{value: tir.ParameterProperty{
 			Name: cleanText(property.Name), Description: cleanText(property.Description),
-			Required: property.Required, Shape: compileShape(property.Shape),
+			Required: property.Required, Shape: shape,
 		}}
 		if property.SourceOrder != nil {
 			item.order, item.hasOrder = *property.SourceOrder, true
@@ -674,7 +714,7 @@ func compileProperties(source []observation.ParameterProperty) []tir.ParameterPr
 	for i := range values {
 		result[i] = values[i].value
 	}
-	return result
+	return result, nil
 }
 
 func compileLocator(field string, source observation.Locator) (tir.LocatorCandidate, []observation.Evidence, error) {
@@ -776,11 +816,71 @@ func mergeEvidence(target map[string]observation.Evidence, source []observation.
 }
 
 func validateEvidence(field string, evidence observation.Evidence) error {
+	if err := validateEvidenceKind(field+".kind", evidence.Kind); err != nil {
+		return err
+	}
 	if math.IsNaN(evidence.Score) || math.IsInf(evidence.Score, 0) ||
 		evidence.Score < 0 || evidence.Score > 1 {
 		return &Error{Field: field + ".score", Code: "invalid_confidence", Message: "must be a finite number in [0, 1]"}
 	}
 	return nil
+}
+
+func validateSourceKind(field string, kind observation.SourceKind) error {
+	switch kind {
+	case observation.SourceLaunchURL, observation.SourceCDPAttach:
+		return nil
+	default:
+		return &Error{Field: field, Code: "invalid_source_kind", Message: "must be launch_url or cdp_attach"}
+	}
+}
+
+func validateValueType(field string, value observation.ValueType) error {
+	switch value {
+	case observation.ValueString, observation.ValueNumber, observation.ValueInteger,
+		observation.ValueBoolean, observation.ValueObject, observation.ValueArray:
+		return nil
+	default:
+		return &Error{Field: field, Code: "invalid_value_type", Message: "must be string, number, integer, boolean, object, or array"}
+	}
+}
+
+func validateActionKind(field string, kind observation.ActionKind) error {
+	switch kind {
+	case observation.ActionClick, observation.ActionFill, observation.ActionSelect, observation.ActionCheck:
+		return nil
+	default:
+		return &Error{Field: field, Code: "invalid_action_kind", Message: "must be click, fill, select, or check"}
+	}
+}
+
+func validateSideEffect(field string, sideEffect observation.SideEffect) error {
+	switch sideEffect.Class {
+	case observation.SideEffectNone, observation.SideEffectLocalState, observation.SideEffectNetwork,
+		observation.SideEffectNavigation, observation.SideEffectSubmission, observation.SideEffectUnknown:
+	default:
+		return &Error{Field: field + ".class", Code: "invalid_side_effect", Message: "contains an unsupported value"}
+	}
+	if sideEffect.SafeForExploration &&
+		(sideEffect.Class == observation.SideEffectNavigation ||
+			sideEffect.Class == observation.SideEffectSubmission ||
+			sideEffect.Class == observation.SideEffectUnknown) {
+		return &Error{
+			Field: field, Code: "unsafe_exploration",
+			Message: "navigation, submission, and unknown cannot be safe for exploration",
+		}
+	}
+	return nil
+}
+
+func validateEvidenceKind(field string, kind observation.EvidenceKind) error {
+	switch kind {
+	case observation.EvidenceDOM, observation.EvidenceAccessibility,
+		observation.EvidencePageMetadata, observation.EvidenceHeuristic:
+		return nil
+	default:
+		return &Error{Field: field, Code: "invalid_provenance_kind", Message: "must be dom, accessibility, page_metadata, or heuristic"}
+	}
 }
 
 func validateRawFramePath(field string, path []observation.FrameReference) error {
@@ -845,6 +945,15 @@ func actionIdentity(action tir.ActionBinding, locatorKeys []string) string {
 func actionOutputKey(action tir.ActionBinding) string {
 	return joinedKey(string(action.Action), action.InputParameter,
 		strings.Join(action.LocatorCandidateIDs, "\x1e"), string(action.SideEffect.Class))
+}
+
+func locatorIdentityKey(locator tir.LocatorCandidate) string {
+	data, _ := json.Marshal(struct {
+		FramePath  []tir.PathNode
+		ShadowPath []tir.PathNode
+		Semantic   *tir.SemanticLocator
+	}{locator.FramePath, locator.ShadowPath, locator.Semantic})
+	return string(data)
 }
 
 func locatorSlug(locator tir.LocatorCandidate) string {
@@ -937,6 +1046,11 @@ func humanize(value string) string {
 	return string(runes)
 }
 
+// toolIDSlugLimit leaves room for "-" plus a 12-character digest and an
+// occasional numeric collision suffix while staying within TIR's 64-character
+// tool-id contract.
+const toolIDSlugLimit = 48
+
 func slug(value, fallback string) string {
 	var builder strings.Builder
 	separator := false
@@ -950,6 +1064,12 @@ func slug(value, fallback string) string {
 		}
 	}
 	result := strings.Trim(builder.String(), "-")
+	if result == "" {
+		return fallback
+	}
+	if len(result) > toolIDSlugLimit {
+		result = strings.Trim(result[:toolIDSlugLimit], "-")
+	}
 	if result == "" {
 		return fallback
 	}

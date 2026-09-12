@@ -6,15 +6,25 @@ produces canonical TIR. Batch order and unordered input slices do not affect the
 result. Parameter and object-property source order is preserved only when an
 explicit `SourceOrder` is present; otherwise names provide canonical order.
 
+Every enum-valued observation field is rejected at this boundary with a
+`compiler.Error` whose `Field` names the input path: source kind, value types,
+action kinds, side-effect classes, and evidence kinds. Navigation, submission,
+and unknown cannot be marked safe to explore.
+
 Interaction identity consists of interaction kind, frame path, semantic scope,
-role, and normalized accessible name. Locator content is also included when a
-name must be inferred. Scope identity includes each node's match ordinal, so
-two scopes that share a role and a name but select different elements are
-distinct and their tools are not merged. This deduplicates repeated observations
-without merging equivalent-looking controls in different frames or semantic
-scopes. IDs use an ASCII semantic slug plus the first 48 bits of SHA-256 over
-length-delimited canonical identity. If those complete IDs collide, identities
-are sorted and receive deterministic numeric suffixes.
+role, and normalized accessible name. When a name is absent — including when
+the extractor had only a positional fallback — identity includes the semantic
+and path halves of each locator, not the CSS fallback. Scope identity includes
+each node's match ordinal, so two scopes that share a role and a name but
+select different elements are distinct and their tools are not merged. This
+deduplicates repeated observations without merging equivalent-looking controls
+in different frames or semantic scopes, and without changing an unaffected
+tool's ID when an unrelated earlier element is inserted.
+
+IDs use an ASCII semantic slug (capped so the complete ID stays within 64
+characters) plus the first 48 bits of SHA-256 over length-delimited canonical
+identity. If those complete IDs collide, identities are sorted and receive
+deterministic numeric suffixes.
 
 ## One tool per capability
 

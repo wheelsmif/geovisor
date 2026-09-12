@@ -95,27 +95,89 @@ func TestCompileRejectsInvalidRawReferences(t *testing.T) {
 		name   string
 		mutate func(*Input)
 		code   string
+		field  string
 	}{
 		{
 			name: "negative frame index",
 			mutate: func(input *Input) {
 				input.Batches[0].Frames[0].Path = []observation.FrameReference{{Index: -1}}
 			},
-			code: "invalid_frame_index",
+			code:  "invalid_frame_index",
+			field: "batches[0].frames[0].path[0].index",
 		},
 		{
 			name: "invalid locator index",
 			mutate: func(input *Input) {
 				input.Batches[0].Interactions[0].Actions[0].LocatorIndexes = []int{99}
 			},
-			code: "invalid_locator_index",
+			code:  "invalid_locator_index",
+			field: "batches[0].interactions[0].actions[0].locatorIndexes[0]",
 		},
 		{
 			name: "invalid evidence score",
 			mutate: func(input *Input) {
 				input.Batches[0].Interactions[0].Evidence[0].Score = 2
 			},
-			code: "invalid_confidence",
+			code:  "invalid_confidence",
+			field: "batches[0].interactions[0].evidence[0].score",
+		},
+		{
+			name: "invalid source kind",
+			mutate: func(input *Input) {
+				input.Source.Kind = "file"
+			},
+			code:  "invalid_source_kind",
+			field: "source.kind",
+		},
+		{
+			name: "invalid parameter type",
+			mutate: func(input *Input) {
+				input.Batches[0].Interactions[0].Parameters[0].Type = "date"
+			},
+			code:  "invalid_value_type",
+			field: "batches[0].interactions[0].parameters[0].type",
+		},
+		{
+			name: "invalid nested shape type",
+			mutate: func(input *Input) {
+				input.Batches[0].Interactions[0].Parameters[0].Items = &observation.ParameterShape{Type: "date"}
+			},
+			code:  "invalid_value_type",
+			field: "batches[0].interactions[0].parameters[0].items.type",
+		},
+		{
+			name: "invalid action kind",
+			mutate: func(input *Input) {
+				input.Batches[0].Interactions[0].Actions[0].Kind = "hover"
+			},
+			code:  "invalid_action_kind",
+			field: "batches[0].interactions[0].actions[0].kind",
+		},
+		{
+			name: "invalid side-effect class",
+			mutate: func(input *Input) {
+				input.Batches[0].Interactions[0].Actions[0].SideEffect.Class = "destructive"
+			},
+			code:  "invalid_side_effect",
+			field: "batches[0].interactions[0].actions[0].sideEffect.class",
+		},
+		{
+			name: "unknown marked safe to explore",
+			mutate: func(input *Input) {
+				input.Batches[0].Interactions[0].Actions[0].SideEffect = observation.SideEffect{
+					Class: observation.SideEffectUnknown, SafeForExploration: true,
+				}
+			},
+			code:  "unsafe_exploration",
+			field: "batches[0].interactions[0].actions[0].sideEffect",
+		},
+		{
+			name: "invalid evidence kind",
+			mutate: func(input *Input) {
+				input.Batches[0].Interactions[0].Evidence[0].Kind = "browser"
+			},
+			code:  "invalid_provenance_kind",
+			field: "batches[0].interactions[0].evidence[0].kind",
 		},
 	}
 	for _, test := range tests {
@@ -128,6 +190,9 @@ func TestCompileRejectsInvalidRawReferences(t *testing.T) {
 			var compilerError *Error
 			if !errors.As(err, &compilerError) || compilerError.Code != test.code {
 				t.Fatalf("error = %T %v, want compiler error %q", err, err, test.code)
+			}
+			if compilerError.Field != test.field {
+				t.Fatalf("field = %q, want %q", compilerError.Field, test.field)
 			}
 		})
 	}
@@ -161,6 +226,64 @@ func TestCompileRepeatedShuffleIsByteIdentical(t *testing.T) {
 		if !bytes.Equal(actual, baseline) {
 			t.Fatalf("iteration %d produced different bytes\nwant: %s\n got: %s", iteration, baseline, actual)
 		}
+	}
+}
+
+func TestCompileIDsStableWhenUnrelatedInteractionInserted(t *testing.T) {
+	t.Parallel()
+
+	unnamed := observation.Interaction{
+		Kind: observation.InteractionControl,
+		Role: "textbox",
+		Locators: []observation.Locator{{
+			Semantic: &observation.SemanticLocator{Role: "textbox"},
+			Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:input", Score: 0.7}},
+		}},
+		Actions: []observation.Action{{
+			Kind:       observation.ActionFill,
+			SideEffect: observation.SideEffect{Class: observation.SideEffectUnknown},
+		}},
+		Evidence: []observation.Evidence{{Kind: observation.EvidenceHeuristic, Reference: "name:fallback", Score: 0.35}},
+	}
+	unrelated := observation.Interaction{
+		Kind: observation.InteractionAction,
+		Role: "button",
+		Name: "Elsewhere",
+		Locators: []observation.Locator{{
+			Semantic: &observation.SemanticLocator{Role: "button", Name: "Elsewhere"},
+			Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:button", Score: 0.7}},
+		}},
+		Actions: []observation.Action{{
+			Kind:       observation.ActionClick,
+			SideEffect: observation.SideEffect{Class: observation.SideEffectUnknown},
+		}},
+		Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:button", Score: 0.6}},
+	}
+
+	baseline, err := Compile(Input{
+		Source:  observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{Interactions: []observation.Interaction{unnamed}}},
+	})
+	if err != nil {
+		t.Fatalf("compile baseline: %v", err)
+	}
+	if len(baseline.Tools) != 1 {
+		t.Fatalf("baseline tools = %d, want 1", len(baseline.Tools))
+	}
+
+	shifted, err := Compile(Input{
+		Source:  observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{Interactions: []observation.Interaction{unrelated, unnamed}}},
+	})
+	if err != nil {
+		t.Fatalf("compile shifted: %v", err)
+	}
+	if toolID(t, shifted, baseline.Tools[0].Name, baseline.Tools[0].Description) != baseline.Tools[0].ID {
+		t.Fatalf(
+			"unrelated earlier interaction changed tool ID from %q to %q",
+			baseline.Tools[0].ID,
+			toolID(t, shifted, baseline.Tools[0].Name, baseline.Tools[0].Description),
+		)
 	}
 }
 
@@ -326,6 +449,17 @@ func shuffleInput(random *rand.Rand, input *Input) {
 			}
 		}
 	}
+}
+
+func toolID(t *testing.T, document *tir.Document, name, description string) string {
+	t.Helper()
+	for _, tool := range document.Tools {
+		if tool.Name == name && tool.Description == description {
+			return tool.ID
+		}
+	}
+	t.Fatalf("tool %q (%q) not found", name, description)
+	return ""
 }
 
 func findTool(t *testing.T, document *tir.Document, name string) tir.Tool {

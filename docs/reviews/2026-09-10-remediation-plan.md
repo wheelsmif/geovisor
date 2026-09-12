@@ -5,7 +5,7 @@ Plan of record for the 48 findings in
 during remediation. Finding IDs are stable and are never renumbered; this
 document tracks each `GV-NNN` to a phase, a task, and an exit condition.
 
-Status: **Phases 1, 2, and 3 complete.** Every finding was re-confirmed against the
+Status: **Phases 1, 2, 3, and 4 complete.** Every finding was re-confirmed against the
 working tree before this plan was written.
 
 ## Findings added during remediation
@@ -691,6 +691,14 @@ independent opinions about validity.
 every registered format, asserted by a test that runs all formats over the
 validation corpus.
 
+**Done.** `validateShapeCompatibility` and the JSON Schema `shapeCompatibility`
+def own the same type-consistent shape rules `convertShape` used to enforce
+alone. Invalid shapes now fail at `tir.Validate` / `tir.Marshal`, so emitters
+report `invalid_document` rather than a late `unsupported_shape`.
+`TestValidDocumentEmitsOnEveryFormat` runs every registered format, including
+strict mode, over the emitter fixture. WebMCP still rejects locator-less
+actions as a format-specific execution constraint.
+
 ### 4.2 GV-016 — Validate the compiler's input boundary (S2)
 
 The package defines `compiler.Error` "for malformed raw input" and uses it for
@@ -704,11 +712,20 @@ Bad input therefore surfaces as
 at the compiler boundary with a `compiler.Error` whose `Field` names the *input*
 path.
 
+**Done.** Source kind, value types (including nested shapes), action kinds,
+side-effect classes, evidence kinds, and unsafe exploration of `unknown` are
+rejected with input-path `Field` values. Table-driven tests assert both the
+code and the field.
+
 ### 4.3 GV-015 — Each emitter validates its own format (S3)
 
 OpenAI validates `tool.ID` against `^[A-Za-z0-9_-]{1,64}$`; MCP and WebMCP emit
 the same ID unchecked. Either each emitter enforces its target format's
 identifier constraints, or the constraint is hoisted into TIR alongside 4.1.
+
+**Done.** Hoisted into TIR and the JSON Schema so 4.1 holds. The compiler caps
+the ID slug so generated identifiers stay inside 64 characters. OpenAI still
+checks the pattern as defense in depth.
 
 ### 4.4 GV-017 — Unambiguous frame path keys (S3)
 
@@ -721,6 +738,10 @@ in the codebase.
 **Acceptance:** No two distinct frame paths produce the same key; ordering is
 numeric on `index`.
 
+**Done.** `framePathKey` is length-prefixed on index, name, and src, matching
+the compiler's `joinedKey` pattern. Distinct paths whose names and srcs contain
+`:` or `;` no longer collide, and index `2` sorts before `10`.
+
 ### 4.5 GV-018 — Tool IDs stop churning (S3)
 
 `fallbackIndex` comes from `record.sourceOrder`, a document-wide traversal
@@ -732,13 +753,23 @@ what a consumer of a "stable ID" will actually rely on.
 **Acceptance:** Adding an unrelated element earlier in the document does not
 change the IDs of unaffected tools; a test asserts this.
 
+**Done.** Positional fallback names are display-only: they do not become
+interaction names or semantic match keys. Unnamed-tool identity uses the
+semantic and path halves of each locator, not CSS and not `sourceOrder`.
+Extractor and compiler tests insert an unrelated earlier element and assert
+the unaffected tool is unchanged.
+
 ### 4.6 GV-029 — `Options.Strict` is honored or rejected (S3)
 
 MCP and WebMCP both discard `Options` entirely. Silently ignoring a
 caller-supplied option is worse than rejecting it: either honor it or return a
 typed error.
 
-**Phase exit:** GV-014 through GV-018, GV-029 closed.
+**Done.** Both lanes pass `Options.Strict` through `toolInputSchema`, matching
+OpenAI. `--openai-strict` remains an OpenAI-only CLI flag; the Go option is
+honored wherever it is supplied.
+
+**Phase exit — met.** GV-014 through GV-018, GV-029 closed.
 
 ---
 

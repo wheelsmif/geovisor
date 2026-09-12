@@ -3,6 +3,7 @@ package tir
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -30,6 +31,9 @@ func validateDocument(d *Document) error {
 		path := fmt.Sprintf("tools[%d]", ti)
 		if strings.TrimSpace(tool.ID) == "" {
 			return invalid(path+".id", "required", "must not be empty")
+		}
+		if !validToolID(tool.ID) {
+			return invalid(path+".id", "invalid_tool_id", "must match ^[A-Za-z0-9_-]{1,64}$")
 		}
 		if _, exists := toolIDs[tool.ID]; exists {
 			return invalid(path+".id", "duplicate_tool_id", "must be unique")
@@ -224,6 +228,9 @@ func validateParameter(path string, parameter *Parameter) error {
 	if !validValueType(parameter.Type) {
 		return invalid(path+".type", "invalid_value_type", "contains an unsupported value")
 	}
+	if err := validateShapeCompatibility(path, parameter.Type, parameter.Enum, parameter.Items, parameter.Properties); err != nil {
+		return err
+	}
 	if err := validateUniqueStrings(path+".enum", parameter.Enum); err != nil {
 		return err
 	}
@@ -253,6 +260,9 @@ func validateParameter(path string, parameter *Parameter) error {
 func validateShape(path string, shape *ParameterShape) error {
 	if !validValueType(shape.Type) {
 		return invalid(path+".type", "invalid_value_type", "contains an unsupported value")
+	}
+	if err := validateShapeCompatibility(path, shape.Type, shape.Enum, shape.Items, shape.Properties); err != nil {
+		return err
 	}
 	if err := validateUniqueStrings(path+".enum", shape.Enum); err != nil {
 		return err
@@ -310,8 +320,61 @@ func validateProvenance(path string, provenance []Provenance) error {
 	return nil
 }
 
+func validateShapeCompatibility(
+	path string,
+	valueType ValueType,
+	enum []string,
+	items *ParameterShape,
+	properties []ParameterProperty,
+) error {
+	switch valueType {
+	case ValueObject:
+		if items != nil {
+			return invalid(path+".items", "incompatible_shape", "object schemas cannot define items")
+		}
+		if len(enum) != 0 {
+			return invalid(path+".enum", "incompatible_shape", "object schemas cannot use string enums")
+		}
+	case ValueArray:
+		if items == nil {
+			return invalid(path+".items", "incompatible_shape", "array schemas require items")
+		}
+		if len(properties) != 0 {
+			return invalid(path+".properties", "incompatible_shape", "array schemas cannot define properties")
+		}
+		if len(enum) != 0 {
+			return invalid(path+".enum", "incompatible_shape", "array schemas cannot use string enums")
+		}
+	case ValueString:
+		if items != nil || len(properties) != 0 {
+			return invalid(path, "incompatible_shape", "string schemas cannot define items or properties")
+		}
+	case ValueNumber, ValueInteger, ValueBoolean:
+		if items != nil || len(properties) != 0 || len(enum) != 0 {
+			return invalid(path, "incompatible_shape", "primitive schema contains incompatible items, properties, or string enum")
+		}
+	}
+	return nil
+}
+
 func validSourceKind(kind SourceKind) bool {
 	return kind == SourceLaunchURL || kind == SourceCDPAttach
+}
+
+func validToolID(id string) bool {
+	if len(id) < 1 || len(id) > 64 {
+		return false
+	}
+	for _, character := range id {
+		if character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' ||
+			character == '_' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validValueType(value ValueType) bool {
@@ -349,7 +412,9 @@ func validSideEffectClass(class SideEffectClass) bool {
 func framePathKey(path []FrameReference) string {
 	var builder strings.Builder
 	for _, frame := range path {
-		fmt.Fprintf(&builder, "%d:%s:%s;", frame.Index, frame.Name, frame.Src)
+		index := strconv.Itoa(frame.Index)
+		fmt.Fprintf(&builder, "%d:%s%d:%s%d:%s",
+			len(index), index, len(frame.Name), frame.Name, len(frame.Src), frame.Src)
 	}
 	return builder.String()
 }

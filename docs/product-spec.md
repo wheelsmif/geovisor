@@ -36,6 +36,15 @@ WebMCP, MCP, or OpenAI tool formats.
 ## TIR contract
 
 - TIR is versioned and emitter-agnostic.
+- `tir.Validate` and `schemas/tir.schema.json` are the single validity gate
+  for shape and identifier constraints: every document they accept emits on
+  every registered format. WebMCP additionally requires each executable
+  action to name at least one locator candidate.
+- Parameter shapes are type-consistent: arrays have items, objects do not carry
+  string enums or items, and primitives do not carry items, properties, or
+  string enums.
+- Tool IDs match `^[A-Za-z0-9_-]{1,64}$` so every emitter can use them as
+  function names.
 - Locator candidates model frame traversal, shadow traversal, semantic scope,
   role, accessible name, and an optional CSS fallback.
 - Action bindings carry side-effect classification.
@@ -47,4 +56,6 @@ WebMCP, MCP, or OpenAI tool formats.
 
 Producers preserve stable source order, derive any IDs from stable content, call
 `Normalize` before serialization, and avoid maps in canonical DTOs. All JSON
-collections serialize as arrays, including empty collections.
+collections serialize as arrays, including empty collections. Tool IDs are
+stable across unrelated earlier DOM edits: positional fallback names and CSS
+selectors are not part of identity.

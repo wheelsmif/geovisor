@@ -128,7 +128,12 @@
         "provenance"
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
         "name": { "type": "string", "minLength": 1 },
         "description": { "type": "string" },
         "parameters": {
@@ -169,7 +174,8 @@
           "type": "array",
           "items": { "$ref": "#/$defs/parameterProperty" }
         }
-      }
+      },
+      "allOf": [{ "$ref": "#/$defs/shapeCompatibility" }]
     },
     "parameterShape": {
       "type": "object",
@@ -187,7 +193,62 @@
           "type": "array",
           "items": { "$ref": "#/$defs/parameterProperty" }
         }
-      }
+      },
+      "allOf": [{ "$ref": "#/$defs/shapeCompatibility" }]
+    },
+    "shapeCompatibility": {
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "array" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["items"],
+            "properties": {
+              "enum": { "maxItems": 0 },
+              "properties": { "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "object" } },
+            "required": ["type"]
+          },
+          "then": {
+            "not": { "required": ["items"] },
+            "properties": {
+              "enum": { "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "string" } },
+            "required": ["type"]
+          },
+          "then": {
+            "not": { "required": ["items"] },
+            "properties": {
+              "properties": { "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "enum": ["number", "integer", "boolean"] } },
+            "required": ["type"]
+          },
+          "then": {
+            "not": { "required": ["items"] },
+            "properties": {
+              "enum": { "maxItems": 0 },
+              "properties": { "maxItems": 0 }
+            }
+          }
+        }
+      ]
     },
     "parameterProperty": {
       "type": "object",

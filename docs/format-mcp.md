@@ -15,7 +15,10 @@ MCP server. GEO-Visor deliberately provides no MCP host runtime. It omits
 
 Input schemas use JSON Schema 2020-12 semantics (the default dialect for this
 MCP revision). Object schemas recursively set `additionalProperties` to
-`false`, preserve TIR property order, and retain exact required fields.
+`false` and preserve TIR property order. `Options.Strict` is honored the same
+way as the OpenAI lane: every property becomes required, and originally
+optional properties add `null` to their `type`. Non-strict emission retains
+the TIR required list exactly.
 
 Annotations are conservative aggregates over every action:
 

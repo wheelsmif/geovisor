@@ -141,7 +141,8 @@ function isHiddenLocally(element: Element): boolean {
  * The recomputable sources live in `shared/name.ts` so the generated runtime
  * derives the same name when it looks the element up again. Only the positional
  * fallback is local: it depends on a document-wide traversal counter the runtime
- * cannot know, so it is a display name and never a match key.
+ * cannot know, so it is a parameter-name hint and never a match key or tool
+ * identity (GV-018).
  */
 function labelFor(element: Element, role: string, fallbackIndex: number): LabelResult {
   const derived = accessibleName(element, role);
@@ -151,6 +152,20 @@ function labelFor(element: Element, role: string, fallbackIndex: number): LabelR
     reference: "deterministic-fallback",
     score: 0.35,
   };
+}
+
+/** Display / identity name. Positional fallbacks stay empty so they cannot churn IDs. */
+function recordedName(label: LabelResult): string {
+  return label.reference === "deterministic-fallback" ? "" : label.text;
+}
+
+/**
+ * The name the shared matcher should require. `undefined` means "any name",
+ * which is what a positional fallback must use: an empty string would be
+ * dropped by TIR `omitempty` and then match the wrong element.
+ */
+function locatorMatchName(label: LabelResult): string | undefined {
+  return label.reference === "deterministic-fallback" ? undefined : label.text;
 }
 
 function cssEscape(value: string): string {
@@ -192,8 +207,11 @@ function pathNode(element: Element, sourceOrder: number): PathNode {
   const role = semanticRole(element);
   const label = labelFor(element, role || "host", sourceOrder);
   const node: PathNode = { css: cssFallback(element) };
-  if (role || label.reference !== "deterministic-fallback") {
-    node.semantic = { role: role || GENERIC_ROLE, name: label.text };
+  const name = recordedName(label);
+  if (role) {
+    node.semantic = name ? { role, name } : { role };
+  } else if (name) {
+    node.semantic = { role: GENERIC_ROLE, name };
   }
   return node;
 }
@@ -204,9 +222,8 @@ function pathNode(element: Element, sourceOrder: number): PathNode {
  *
  * This is a depth-first child walk rather than a flat `querySelectorAll("*")`
  * scan so that hiding can be inherited from ancestors (GV-002) and across
- * shadow boundaries: a hidden host hides its shadow tree. Pre-order DFS visits
- * elements in the same order the flat scan did, so `sourceOrder` -- and every
- * tool ID derived from it -- is unchanged.
+ * shadow boundaries: a hidden host hides its shadow tree. `sourceOrder` is a
+ * parameter-ordering hint only; tool identity does not read it (GV-018).
  */
 function traverse(root: Document | ShadowRoot): ElementRecord[] {
   const records: ElementRecord[] = [];
@@ -256,7 +273,7 @@ function semanticScope(element: Element): SemanticNode[] {
   return reversed.reverse();
 }
 
-function locatorFor(record: ElementRecord, role: string, name: string): Locator {
+function locatorFor(record: ElementRecord, role: string, name?: string): Locator {
   const semantic = verifiedSemantic(record.element, role, name);
   const dom: Evidence = {
     kind: "dom",
@@ -294,7 +311,7 @@ function locatorFor(record: ElementRecord, role: string, name: string): Locator 
 function verifiedSemantic(
   element: Element,
   role: string,
-  name: string,
+  name?: string,
 ): SemanticLocator | undefined {
   const root = read<Document | ShadowRoot | null>(null, () => {
     const node = element.getRootNode();
@@ -302,7 +319,8 @@ function verifiedSemantic(
   });
   if (!root) return undefined;
 
-  const semantic: SemanticLocator = { scope: semanticScope(element), role, name };
+  const semantic: SemanticLocator = { scope: semanticScope(element), role };
+  if (name !== undefined) semantic.name = name;
   const matches = read<Element[]>([], () => semanticMatches(root, semantic));
   const nth = matches.indexOf(element);
   if (nth < 0) return undefined;
@@ -484,10 +502,10 @@ function controlInteraction(record: ElementRecord): Interaction {
     framePath: [],
     scope: semanticScope(record.element),
     role,
-    name: label.text,
+    name: recordedName(label),
     ...(description ? { description } : {}),
     parameters: [parameter],
-    locators: [locatorFor(record, role, label.text)],
+    locators: [locatorFor(record, role, locatorMatchName(label))],
     actions: [controlAction(record.element, parameter.name)],
     evidence: evidenceFor(label, record.element),
   };
@@ -502,10 +520,10 @@ function actionInteraction(record: ElementRecord): Interaction {
     framePath: [],
     scope: semanticScope(record.element),
     role,
-    name: label.text,
+    name: recordedName(label),
     ...(description ? { description } : {}),
     parameters: [],
-    locators: [locatorFor(record, role, label.text)],
+    locators: [locatorFor(record, role, locatorMatchName(label))],
     actions: [
       {
         kind: "click",
@@ -557,7 +575,7 @@ function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): I
     names.set(base, occurrence);
     const name = occurrence === 1 ? base : `${base}_${occurrence}`;
     parameters.push(parameterFor(record.element, controlLabel, record.sourceOrder, name));
-    locators.push(locatorFor(record, controlRole, controlLabel.text));
+    locators.push(locatorFor(record, controlRole, locatorMatchName(controlLabel)));
     actions.push(controlAction(record.element, name, locators.length - 1));
   }
 
@@ -566,7 +584,7 @@ function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): I
     if (effect.class !== "submission") continue;
     const actionRole = semanticRole(record.element) || "button";
     const actionLabel = labelFor(record.element, actionRole, record.sourceOrder);
-    locators.push(locatorFor(record, actionRole, actionLabel.text));
+    locators.push(locatorFor(record, actionRole, locatorMatchName(actionLabel)));
     actions.push({
       kind: "click",
       locatorIndexes: [locators.length - 1],
@@ -574,7 +592,7 @@ function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): I
     });
   }
 
-  const formLocator = locatorFor(formRecord, role, label.text);
+  const formLocator = locatorFor(formRecord, role, locatorMatchName(label));
   locators.unshift(formLocator);
   for (const action of actions) {
     action.locatorIndexes = action.locatorIndexes.map((index) => index + 1);
@@ -586,7 +604,7 @@ function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): I
     framePath: [],
     scope: semanticScope(form),
     role,
-    name: label.text,
+    name: recordedName(label),
     ...(description ? { description } : {}),
     parameters,
     locators,
@@ -699,11 +717,12 @@ function disambiguateInteractions(interactions: Interaction[]): void {
     const key = `${interaction.kind}\u0002${scope}\u0002${interaction.role}\u0002${interaction.name.toLocaleLowerCase("en-US")}`;
     const occurrence = (occurrences.get(key) ?? 0) + 1;
     occurrences.set(key, occurrence);
-    if (occurrence > 1) {
+    if (occurrence > 1 && interaction.name) {
       // Only the display name is disambiguated. The locator keeps the name the
       // element actually carries, because that is the only name the runtime can
       // recompute; ambiguity is resolved by the ordinal in the semantic locator
-      // instead (GV-004).
+      // instead (GV-004). Positional fallbacks leave name empty so they are
+      // not rewritten into a document-wide index (GV-018).
       interaction.name = `${interaction.name} (${occurrence})`;
       interaction.evidence.push({
         kind: "heuristic",
