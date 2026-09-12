@@ -44,6 +44,7 @@ type roundTripElement struct {
 	Value         string `json:"value"`
 	Checked       bool   `json:"checked"`
 	SelectedIndex *int   `json:"selectedIndex"`
+	SelectedLabel string `json:"selectedLabel"`
 	Text          string `json:"text"`
 }
 
@@ -120,8 +121,6 @@ func knownFailure(t *testing.T, finding, summary string) {
 }
 
 func TestWebMCPRuntimeResolvesAgainstOriginatingDOM(t *testing.T) {
-	knownFailure(t, "GV-001", "select tools advertise option labels but assign them as option values")
-
 	_, report := runRoundTrip(t, fixturePath, nil)
 
 	if report.ModuleError != "" {
@@ -153,16 +152,15 @@ func TestWebMCPRuntimeSelectAppliesAdvertisedOption(t *testing.T) {
 	// pipeline tests assert never reach an artifact, so the repair cannot be
 	// "emit the option value". The runtime has to select by the same label it
 	// advertises.
-	knownFailure(t, "GV-001", "runtime assigns the advertised option label to element.value")
-
 	_, report := runRoundTrip(t, fixturePath, nil)
 
 	tool := report.bySlug(t, "plan")
 	if tool.Error != "" {
 		t.Fatalf("select tool %q failed to execute: %s", tool.Name, tool.Error)
 	}
-	if len(tool.State) == 0 {
-		t.Fatalf("select tool %q changed no element state", tool.Name)
+	requested, ok := tool.Input["plan"].(string)
+	if !ok {
+		t.Fatalf("select tool %q was not given a plan value: %#v", tool.Name, tool.Input)
 	}
 	for _, state := range tool.State {
 		if state.Tag != "select" {
@@ -171,9 +169,18 @@ func TestWebMCPRuntimeSelectAppliesAdvertisedOption(t *testing.T) {
 		if state.SelectedIndex == nil || *state.SelectedIndex < 0 {
 			t.Fatalf("select %q has no selected option after execution", tool.Name)
 		}
+		// The selection must land on the option carrying the advertised label.
+		// Asserting the label, not the value, is the point of GV-001: option
+		// values never leave the page, so the label is the only shared key.
+		if state.SelectedLabel != requested {
+			t.Fatalf(
+				"select %q requested %q but selected option is labelled %q",
+				tool.Name, requested, state.SelectedLabel,
+			)
+		}
 		return
 	}
-	t.Fatalf("select tool %q never changed a select element", tool.Name)
+	t.Fatalf("select tool %q never resolved to a select element", tool.Name)
 }
 
 func TestWebMCPRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
@@ -186,11 +193,10 @@ func TestWebMCPRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
 	// This is also how GV-049 was found: the runtime's role table is a strict
 	// subset of the extractor's, so locators scoped by details, fieldset, nav,
 	// dialog, or summary can never match.
-	knownFailure(
-		t,
-		"GV-001, GV-004, GV-049",
-		"semantic locators carry disambiguated names and roles the runtime cannot compute",
-	)
+	// Sole remaining cause: disambiguation writes a display name ("Query (2)")
+	// into the locator's match key, and no element carries that name. Phase 2.5
+	// separates the display name from the match key.
+	knownFailure(t, "GV-004", "disambiguated locator names do not exist in the DOM")
 
 	_, report := runRoundTrip(t, fixturePath, stripCSSFallbacks)
 

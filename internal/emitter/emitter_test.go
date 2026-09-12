@@ -215,7 +215,13 @@ func TestAnnotationDerivationForEverySideEffect(t *testing.T) {
 	}
 }
 
-func TestWebMCPModuleSafetyAndRuntime(t *testing.T) {
+// TestWebMCPModuleSafetyInvariants checks the properties of the emitted text:
+// escaping, the capability guard, and how the embedded runtime is wired to the
+// definitions. It deliberately does not claim to test runtime behavior --
+// substring searches cannot tell a working module from a file containing the
+// right words (GV-038). Runtime behavior is covered by executing the module in
+// internal/integration/webmcp_roundtrip_test.go (GV-036).
+func TestWebMCPModuleSafetyInvariants(t *testing.T) {
 	t.Parallel()
 
 	result, err := (WebMCP{}).Emit(context.Background(), fixtureDocument(), Options{})
@@ -225,7 +231,7 @@ func TestWebMCPModuleSafetyAndRuntime(t *testing.T) {
 	source := string(result.Primary.Data)
 	for _, required := range []string{
 		"document.modelContext.registerTool",
-		"execute: async",
+		"__geovisorRuntime.register(__geovisorDefinitions)",
 		"page JavaScript cannot bypass this browser boundary",
 		"shadowRoot",
 		"consequentialHint",

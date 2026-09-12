@@ -13,9 +13,12 @@ import type {
   SideEffect,
   ValueType,
 } from "./types";
+import { cleanText, DESCRIPTION_LIMIT, humanize } from "./shared/text";
+import { explicitRole, inputType, parentAcrossShadow, read, referencedText } from "./shared/dom";
+import { GENERIC_ROLE, isContentEditable, semanticRole } from "./shared/role";
+import { accessibleName, type NameSource } from "./shared/name";
+import { optionLabels } from "./shared/option";
 
-const TEXT_LIMIT = 256;
-const DESCRIPTION_LIMIT = 512;
 const DEFAULT_MAX_DEPTH = 3;
 const DEFAULT_MAX_OPERATIONS = 20;
 const DEFAULT_TIMEOUT_MS = 1_000;
@@ -62,7 +65,7 @@ interface ElementRecord {
 
 interface LabelResult {
   text: string;
-  reference: string;
+  reference: NameSource | "deterministic-fallback";
   score: number;
 }
 
@@ -76,19 +79,6 @@ interface NormalizedOptions {
   maxDepth: number;
   maxOperations: number;
   timeoutMs: number;
-}
-
-function cleanText(value: string | null | undefined, limit = TEXT_LIMIT): string {
-  if (!value) return "";
-  return value.replace(/\s+/gu, " ").trim().slice(0, limit);
-}
-
-function read<T>(fallback: T, operation: () => T): T {
-  try {
-    return operation();
-  } catch {
-    return fallback;
-  }
 }
 
 function clampInteger(value: number | undefined, fallback: number, maximum: number): number {
@@ -109,54 +99,6 @@ function normalizeOptions(options: ExtractionOptions | undefined): NormalizedOpt
   };
 }
 
-function explicitRole(element: Element): string {
-  return cleanText(element.getAttribute("role")).toLowerCase().split(" ")[0] ?? "";
-}
-
-function inputType(element: HTMLInputElement): string {
-  return cleanText(element.getAttribute("type") ?? "text").toLowerCase() || "text";
-}
-
-function semanticRole(element: Element): string {
-  const explicit = explicitRole(element);
-  if (explicit) return explicit;
-
-  const tag = element.localName;
-  if (tag === "form") return "form";
-  if (tag === "nav") return "navigation";
-  if (tag === "button" || tag === "summary") return "button";
-  if (tag === "a" && element.hasAttribute("href")) return "link";
-  if (tag === "textarea" || element.hasAttribute("contenteditable")) return "textbox";
-  if (tag === "select") {
-    return (element as HTMLSelectElement).multiple ? "listbox" : "combobox";
-  }
-  if (tag === "input") {
-    switch (inputType(element as HTMLInputElement)) {
-      case "button":
-      case "image":
-      case "reset":
-      case "submit":
-        return "button";
-      case "checkbox":
-        return "checkbox";
-      case "radio":
-        return "radio";
-      case "range":
-        return "slider";
-      case "number":
-        return "spinbutton";
-      case "search":
-        return "searchbox";
-      default:
-        return "textbox";
-    }
-  }
-  if (tag === "dialog") return "dialog";
-  if (tag === "details" || tag === "fieldset") return "group";
-  if (/^h[1-6]$/u.test(tag)) return "heading";
-  return "";
-}
-
 function isHidden(element: Element): boolean {
   if (element.localName === "input" && inputType(element as HTMLInputElement) === "hidden") {
     return true;
@@ -170,121 +112,22 @@ function isHidden(element: Element): boolean {
   });
 }
 
-function referencedText(element: Element, attribute: string): string {
-  const ids = cleanText(element.getAttribute(attribute), DESCRIPTION_LIMIT).split(" ").filter(Boolean);
-  const root = element.getRootNode();
-  if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
-  return cleanText(
-    ids
-      .map((id) => read("", () => cleanText(root.getElementById(id)?.textContent)))
-      .filter(Boolean)
-      .join(" "),
-  );
-}
-
-function labelsText(element: Element): string {
-  if (!(element instanceof HTMLInputElement ||
-        element instanceof HTMLSelectElement ||
-        element instanceof HTMLTextAreaElement)) {
-    return "";
-  }
-  return cleanText(
-    Array.from(element.labels ?? [])
-      .map((label) => cleanText(label.textContent))
-      .filter(Boolean)
-      .join(" "),
-  );
-}
-
-function ownActionText(element: Element): string {
-  if (
-    element.matches(
-      "button, a[href], summary, [role='button'], [role='link'], [role='tab'], [role^='menuitem']",
-    )
-  ) {
-    return cleanText(element.textContent);
-  }
-  if (element instanceof HTMLInputElement) {
-    const type = inputType(element);
-    if (type === "image") return cleanText(element.getAttribute("alt"));
-  }
-  return "";
-}
-
-function adjacentText(element: Element): string {
-  const before = element.previousElementSibling;
-  if (before) {
-    const text = cleanText(before.textContent);
-    if (text && text.length <= 120) return text;
-  }
-  const parent = element.parentElement;
-  if (!parent) return "";
-  const direct = Array.from(parent.childNodes)
-    .filter((node) => node.nodeType === Node.TEXT_NODE)
-    .map((node) => cleanText(node.textContent))
-    .filter(Boolean)
-    .join(" ");
-  return direct.length <= 120 ? cleanText(direct) : "";
-}
-
-function parentAcrossShadow(element: Element): Element | null {
-  if (element.parentElement) return element.parentElement;
-  const root = element.getRootNode();
-  return root instanceof ShadowRoot ? root.host : null;
-}
-
-function contextName(element: Element): string {
-  let current = parentAcrossShadow(element);
-  while (current) {
-    const labelled = referencedText(current, "aria-labelledby");
-    const aria = cleanText(current.getAttribute("aria-label"));
-    const legend =
-      current instanceof HTMLFieldSetElement
-        ? cleanText(current.querySelector(":scope > legend")?.textContent)
-        : "";
-    const heading = cleanText(current.querySelector(":scope > h1, :scope > h2, :scope > h3")?.textContent);
-    const name = labelled || aria || legend || heading;
-    if (name) return name;
-    current = parentAcrossShadow(current);
-  }
-  return "";
-}
-
+/**
+ * Resolves the display name for an element.
+ *
+ * The recomputable sources live in `shared/name.ts` so the generated runtime
+ * derives the same name when it looks the element up again. Only the positional
+ * fallback is local: it depends on a document-wide traversal counter the runtime
+ * cannot know, so it is a display name and never a match key.
+ */
 function labelFor(element: Element, role: string, fallbackIndex: number): LabelResult {
-  const label = labelsText(element);
-  if (label) return { text: label, reference: "label", score: 0.98 };
-
-  const labelled = referencedText(element, "aria-labelledby");
-  if (labelled) return { text: labelled, reference: "aria-labelledby", score: 0.98 };
-
-  const aria = cleanText(element.getAttribute("aria-label"));
-  if (aria) return { text: aria, reference: "aria-label", score: 0.96 };
-
-  const own = ownActionText(element);
-  if (own) return { text: own, reference: "content", score: 0.94 };
-
-  const placeholder = cleanText(element.getAttribute("placeholder"));
-  if (placeholder) return { text: placeholder, reference: "placeholder", score: 0.8 };
-
-  const title = cleanText(element.getAttribute("title"));
-  if (title) return { text: title, reference: "title", score: 0.76 };
-
-  const adjacent = adjacentText(element);
-  if (adjacent) return { text: adjacent, reference: "adjacent-text", score: 0.66 };
-
-  const context = contextName(element);
-  if (context) return { text: `${context} ${humanize(role)}`, reference: "semantic-context", score: 0.58 };
-
+  const derived = accessibleName(element, role);
+  if (derived) return { text: derived.text, reference: derived.source, score: derived.score };
   return {
     text: `${humanize(role || element.localName)} ${fallbackIndex + 1}`,
     reference: "deterministic-fallback",
     score: 0.35,
   };
-}
-
-function humanize(value: string): string {
-  const cleaned = cleanText(value.replace(/[-_]+/gu, " "));
-  return cleaned ? cleaned[0]!.toUpperCase() + cleaned.slice(1) : "Interaction";
 }
 
 function cssEscape(value: string): string {
@@ -327,7 +170,7 @@ function pathNode(element: Element, sourceOrder: number): PathNode {
   const label = labelFor(element, role || "host", sourceOrder);
   const node: PathNode = { css: cssFallback(element) };
   if (role || label.reference !== "deterministic-fallback") {
-    node.semantic = { role: role || "generic", name: label.text };
+    node.semantic = { role: role || GENERIC_ROLE, name: label.text };
   }
   return node;
 }
@@ -423,16 +266,7 @@ function controlValueType(element: Element): ValueType {
 
 function controlEnum(element: Element): string[] {
   if (!(element instanceof HTMLSelectElement)) return [];
-  const seen = new Set<string>();
-  const values: string[] = [];
-  for (const option of Array.from(element.options)) {
-    const text = cleanText(option.label || option.textContent);
-    if (text && !seen.has(text)) {
-      seen.add(text);
-      values.push(text);
-    }
-  }
-  return values;
+  return optionLabels(element);
 }
 
 function parameterName(label: string): string {
@@ -497,7 +331,7 @@ function isNativeControl(element: Element): boolean {
   return (
     (element.matches("input, select, textarea") &&
       !(element instanceof HTMLInputElement && inputType(element) === "hidden")) ||
-    element.hasAttribute("contenteditable")
+    isContentEditable(element)
   );
 }
 

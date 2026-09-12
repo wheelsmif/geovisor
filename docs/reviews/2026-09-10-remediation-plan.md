@@ -5,7 +5,8 @@ Plan of record for the 48 findings in
 during remediation. Finding IDs are stable and are never renumbered; this
 document tracks each `GV-NNN` to a phase, a task, and an exit condition.
 
-Status: **Phase 1 complete.** Every finding was re-confirmed against the working
+Status: **Phase 1 complete. Phase 2.1 complete**, which also closed GV-001,
+GV-005, GV-035, and GV-049. Every finding was re-confirmed against the working
 tree before this plan was written.
 
 ## Findings added during remediation
@@ -257,6 +258,59 @@ once, reviewably.
 **Exit:** `__geovisorRole` and `__geovisorName` no longer exist as
 hand-maintained Go string literals. Both bundles are staleness-checked.
 
+**Done.** The shared tree is `client/src/shared/{text,dom,role,name,option,
+locate}.ts`. `internal/emitter/webmcp.go` shrank from 334 lines to 129 and now
+holds only the capability guard, the statement separator, and the registration
+call; the runtime is `//go:embed webmcp-runtime.js`.
+
+Two modules were not in the original sketch. `shared/option.ts` was added
+because GV-001's fix requires the advertised enum and the applied selection to
+come from one function, not merely one file. `shared/text.ts` was split out
+because `cleanText` is what makes a recorded name comparable to a recomputed
+one; normalizing differently on the two sides would reintroduce the bug in a
+subtler form.
+
+Closed along the way, because each was a one-function consequence of sharing
+rather than a separable task:
+
+- **GV-001** — `applySelect` matches an option by the advertised label and sets
+  `selectedIndex`. Verified by execution, not substring search: the harness
+  asserts the selected option's *label* equals the requested enum value, and
+  now requests the *last* enum value so a runtime that cannot change the
+  selection at all cannot pass by accident.
+- **GV-049** — one role table. The `<details>`-scoped tools that previously
+  reported `no element with role "group" and name "Help"` now resolve with CSS
+  fallbacks stripped.
+- **GV-005** — `isContentEditable` inspects the attribute *value*, so
+  `contenteditable="false"` is no longer a textbox. It lives in `shared/role.ts`
+  because both sides ask the same question.
+- **GV-035** — `matchAll` computes role and name once per element in a single
+  subtree scan.
+
+**New constraint on shared code: it must be realm-agnostic.** The extractor only
+ever sees elements from the document it was injected into, but the runtime
+resolves *across frame boundaries*, and an element inside an iframe is an
+instance of that frame's `HTMLInputElement`, not the top document's. Reusing the
+extractor's `instanceof` checks in the runtime therefore introduced a latent
+cross-frame bug; the original hand-written runtime had used `localName` and was
+correct here. The harness caught it immediately — as
+`HTMLSelectElement is not defined`, since Node's realm has no DOM constructors —
+which is the first time the Phase 1 investment paid for itself. Shared code now
+identifies elements structurally and the rule is recorded in `client/README.md`.
+
+**Partial GV-038.** `TestWebMCPModuleSafetyAndRuntime` asserted runtime behavior
+by searching for the substring `"execute: async"`, which minification removes.
+It is renamed `TestWebMCPModuleSafetyInvariants`, asserts only text properties
+it can actually establish, and points at the harness for behavior.
+
+**Follow-on cost.** `internal/emitter/testdata/webmcp.golden` embeds the runtime
+bundle, so any runtime source change now requires `UPDATE_GOLDEN=1`. This is
+worth stating plainly rather than working around: it means the committed golden
+records the exact runtime bytes a reviewer is approving.
+
+After 2.1, the semantic-only harness case has exactly one remaining cause —
+GV-004's display name in the match key — instead of three.
+
 ### 2.2 GV-001 — `<select>` tools that actually work (S1)
 
 The extractor builds enums from option *labels*; the runtime assigns the enum
@@ -281,6 +335,11 @@ matching the option and setting `selectedIndex`, rather than assigning
 a tool that changes the selection when the emitted module runs, the harness
 asserts the resulting `selectedIndex`, and no option value appears in any
 artifact.
+
+**Done in 2.1.** `shared/option.ts` owns both the advertised enum and the
+lookup, so there is one function rather than one convention.
+`TestWebMCPRuntimeSelectAppliesAdvertisedOption` passes;
+`assertNoSensitiveValues` still passes, so no option value leaks.
 
 ### 2.3 GV-002 — Ancestor-aware hidden detection (S1)
 
@@ -347,6 +406,10 @@ which is true for the literal string `"false"`.
 **Acceptance:** `contenteditable="false"` produces no control interaction;
 `contenteditable`, `contenteditable=""`, and `contenteditable="true"` still do.
 
+**Done in 2.1**, since both call sites now route through one shared predicate.
+The dedicated fixture asserting each attribute value is still owed and is
+tracked in Section 6.3.
+
 ### 2.7 GV-007 — Stop emitting form controls twice (S2)
 
 Per decision 2: a control owned by a form is a parameter of the form tool and is
@@ -366,14 +429,29 @@ element, once per scope node per resolution attempt. This is the same code
 Section 2.1 rewrites, so it is folded in rather than deferred: resolve scope
 chains with a single scan and memoize per root.
 
+**Done in 2.1.** `matchAll` computes role and name once per element per scan.
+Per-root memoization was deliberately *not* added: resolution mutates the DOM
+between actions, so a cache would have to be invalidated on every apply, and
+the single-scan change already removes the quadratic factor. Revisit only with
+a measurement.
+
 ### 2.9 GV-049 — One role table (S2)
 
-Closed by Section 2.1 rather than separately: once role resolution has a single
+**Done in 2.1**, rather than separately: once role resolution has a single
 implementation, the runtime cannot know fewer roles than the extractor emits.
-Verified by `TestWebMCPRuntimeSemanticStrategyResolvesWithoutCSSFallback`, which
-fails today on `role "group"` for `<details>`.
+`TestWebMCPRuntimeSemanticStrategyResolvesWithoutCSSFallback` no longer reports
+`role "group"` failures for `<details>`.
 
-While fixing this, note a related naming weakness the harness exposed: the
+One subtlety the shared table had to absorb: the extractor records `"generic"`
+for a shadow host with no mapped role, while role resolution returns `""`. Both
+sides now compare through `normalizeRole`, so absent and `"generic"` are the
+same role. Two unreachable fallbacks remain — `semanticRole(...) || "control"`
+and `|| "button"` in the extractor would record a role the runtime could never
+compute — but every element reaching them already has a role. Left alone rather
+than "fixed" speculatively; noted here so a future change to `isControl` or
+`isAction` does not silently make them reachable.
+
+A related naming weakness the harness exposed is still open: the
 `<details>` scope in `forms.html` is named `"Help"`, taken by `adjacentText`
 from an unrelated preceding `<dialog>`. Scope names sourced from adjacent text
 are low-confidence and worth reconsidering alongside GV-018.
@@ -381,6 +459,9 @@ are low-confidence and worth reconsidering alongside GV-018.
 **Phase exit:** GV-001 through GV-005, GV-007, GV-035, GV-037, GV-049 closed,
 and every `knownFailure` call in `internal/integration/webmcp_roundtrip_test.go`
 deleted. The GV-036 harness passes on every corpus fixture.
+
+Remaining in Phase 2 after 2.1: GV-002, GV-003 (with GV-037), GV-004, GV-007.
+One `knownFailure` call is left, naming GV-004.
 
 ---
 

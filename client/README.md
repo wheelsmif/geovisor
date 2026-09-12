@@ -1,8 +1,26 @@
-# Browser extraction payload
+# Browser payloads
 
-`client/src/extractor.ts` is bundled into
-`internal/payload/extractor.js` and embedded by Go. Evaluating the bundle in a
-browser document installs:
+`npm run build` produces two committed bundles from this source tree:
+
+| Entry point | Bundle | Embedded by |
+| --- | --- | --- |
+| `client/src/extractor.ts` | `internal/payload/extractor.js` | `internal/payload` |
+| `client/src/webmcp-runtime.ts` | `internal/emitter/webmcp-runtime.js` | `internal/emitter` |
+
+They share `client/src/shared/`, which owns role resolution, accessible-name
+computation, `<select>` option labels, and element addressing. That sharing is
+load-bearing rather than convenient: the extractor *records* locators and the
+runtime *resolves* them, so any divergence makes a locator unresolvable. These
+were two independent implementations and had silently drifted.
+
+Code under `client/src/shared/` must be realm-agnostic. The extractor only sees
+elements from the document it was injected into, but the runtime resolves across
+frame boundaries, where an element belongs to another realm and `instanceof
+HTMLInputElement` is false. Identify elements structurally instead.
+
+## Extractor
+
+Evaluating `internal/payload/extractor.js` in a browser document installs:
 
 ```js
 await globalThis.__GEOVISOR_EXTRACT__({
@@ -27,5 +45,23 @@ The extractor never reads current control values. Hidden inputs are skipped,
 password fields are represented structurally, and select enums use visible
 option labels rather than option values.
 
+## WebMCP runtime
+
+`internal/emitter` concatenates a capability guard, the tool definitions, the
+runtime bundle, and a call to `__geovisorRuntime.register(...)`. The bundle is
+built as an IIFE assigned to a `globalName`, which becomes a module-scoped `var`
+in the generated ES module rather than a global.
+
+Because option values are page data that must not leave the page, a `<select>`
+tool advertises option labels; the runtime therefore matches an option by label
+and sets `selectedIndex` rather than assigning to `value`.
+
+## Checks
+
 Run `npm run typecheck`, `npm test`, and `npm run verify:bundle`. `npm run build`
-is the only supported way to update the committed embedded bundle.
+is the only supported way to update the committed bundles; `verify:bundle` fails
+if either one is stale.
+
+`internal/integration/webmcp_roundtrip_test.go` executes the generated module
+against the DOM it was extracted from, which is what catches divergence between
+the two bundles.

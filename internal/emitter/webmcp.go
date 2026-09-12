@@ -2,11 +2,22 @@ package emitter
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
 	"github.com/wheelsmif/geovisor/internal/tir"
 )
+
+// webMCPRuntime is generated from client/src/webmcp-runtime.ts by the pinned
+// esbuild toolchain, which is also what builds the extraction payload. Sharing
+// one source tree is what keeps role resolution, accessible-name computation,
+// and element addressing identical on the producer and consumer sides; when the
+// runtime was a Go string literal it had silently drifted from the extractor
+// (GV-001, GV-003, GV-004, GV-049).
+//
+//go:embed webmcp-runtime.js
+var webMCPRuntime string
 
 // WebMCPAPIVersion identifies the browser API used by generated modules.
 const WebMCPAPIVersion = "Chrome 153 imperative API, updated 2026-09-01"
@@ -75,10 +86,14 @@ func (WebMCP) Emit(
 	if err != nil {
 		return Result{}, wrap(FormatWebMCP, CodeMarshal, "", err)
 	}
-	data := make([]byte, 0, len(definitionsJSON)+len(webMCPRuntime))
+	size := len(webMCPPrefix) + len(definitionsJSON) + len(webMCPDefinitionsEnd) +
+		len(webMCPRuntime) + len(webMCPRegistration)
+	data := make([]byte, 0, size)
 	data = append(data, webMCPPrefix...)
 	data = append(data, definitionsJSON...)
+	data = append(data, webMCPDefinitionsEnd...)
 	data = append(data, webMCPRuntime...)
+	data = append(data, webMCPRegistration...)
 	return Result{Primary: Artifact{
 		Name:      "tools.webmcp.js",
 		MediaType: "text/javascript",
@@ -115,244 +130,10 @@ if (typeof document === "undefined" ||
 
 const __geovisorDefinitions = `
 
-const webMCPRuntime = `;
+// webMCPDefinitionsEnd terminates the definitions statement before the embedded
+// runtime bundle, which begins with its own "use strict" directive.
+const webMCPDefinitionsEnd = ";\n\n"
 
-function __geovisorElements(root) {
-  if (!root || typeof root.querySelectorAll !== "function") {
-    throw new Error("locator root does not support DOM queries");
-  }
-  return Array.from(root.querySelectorAll("*"));
-}
-
-function __geovisorRole(element) {
-  const explicit = element.getAttribute("role");
-  if (explicit) return explicit;
-  const tag = element.localName;
-  if (tag === "button") return "button";
-  if (tag === "select") return element.multiple ? "listbox" : "combobox";
-  if (tag === "textarea") return "textbox";
-  if (tag === "a" && element.hasAttribute("href")) return "link";
-  if (tag === "img") return "img";
-  if (tag === "iframe" || tag === "frame") return "iframe";
-  if (tag === "form") return "form";
-  if (tag === "input") {
-    const type = (element.getAttribute("type") || "text").toLowerCase();
-    if (type === "checkbox") return "checkbox";
-    if (type === "radio") return "radio";
-    if (type === "button" || type === "submit" || type === "reset") return "button";
-    if (type === "range") return "slider";
-    if (type === "number") return "spinbutton";
-    if (type !== "hidden") return type === "search" ? "searchbox" : "textbox";
-  }
-  return "";
-}
-
-function __geovisorName(element) {
-  const labelledBy = element.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const documentRoot = element.ownerDocument;
-    const text = labelledBy.split(/\s+/).map((id) => {
-      const label = documentRoot.getElementById(id);
-      return label ? label.textContent.trim() : "";
-    }).filter(Boolean).join(" ");
-    if (text) return text;
-  }
-  const ariaLabel = element.getAttribute("aria-label");
-  if (ariaLabel !== null) return ariaLabel;
-  if (element.labels && element.labels.length) {
-    return Array.from(element.labels).map((label) => label.textContent.trim()).filter(Boolean).join(" ");
-  }
-  const alt = element.getAttribute("alt");
-  if (alt !== null) return alt;
-  const title = element.getAttribute("title");
-  if (title !== null) return title;
-  return (element.textContent || "").trim().replace(/\s+/g, " ");
-}
-
-function __geovisorSemantic(root, semantic) {
-  let scope = root;
-  for (const node of semantic.scope || []) {
-    scope = __geovisorSemanticNode(scope, node);
-  }
-  return __geovisorSemanticNode(scope, semantic);
-}
-
-function __geovisorSemanticNode(root, node) {
-  const matches = __geovisorElements(root).filter((element) => {
-    if (__geovisorRole(element) !== node.role) return false;
-    return !Object.prototype.hasOwnProperty.call(node, "name") ||
-      __geovisorName(element) === node.name;
-  });
-  if (!matches.length) {
-    const suffix = Object.prototype.hasOwnProperty.call(node, "name") ?
-      " and name " + JSON.stringify(node.name) : "";
-    throw new Error("no element with role " + JSON.stringify(node.role) + suffix);
-  }
-  return matches[0];
-}
-
-function __geovisorPathNode(root, node) {
-  const failures = [];
-  if (node.semantic) {
-    try {
-      return __geovisorSemanticNode(root, node.semantic);
-    } catch (error) {
-      failures.push("semantic: " + error.message);
-    }
-  }
-  if (node.cssFallback) {
-    try {
-      const match = root.querySelector(node.cssFallback);
-      if (match) return match;
-      failures.push("CSS " + JSON.stringify(node.cssFallback) + " matched no element");
-    } catch (error) {
-      failures.push("CSS " + JSON.stringify(node.cssFallback) + " is invalid: " + error.message);
-    }
-  }
-  throw new Error(failures.join("; ") || "path node has no locator strategy");
-}
-
-function __geovisorCandidate(candidate) {
-  let root = document;
-  for (let index = 0; index < candidate.framePath.length; index += 1) {
-    const frame = __geovisorPathNode(root, candidate.framePath[index]);
-    if (frame.localName !== "iframe" && frame.localName !== "frame") {
-      throw new Error("framePath[" + index + "] resolved to <" + frame.localName + ">, not a frame");
-    }
-    let childDocument;
-    try {
-      childDocument = frame.contentDocument;
-    } catch (error) {
-      throw new Error("framePath[" + index + "] is cross-origin and inaccessible: " + error.message);
-    }
-    if (!childDocument) {
-      throw new Error(
-        "framePath[" + index + "] is cross-origin, unavailable, or not loaded; " +
-        "page JavaScript cannot bypass this browser boundary"
-      );
-    }
-    root = childDocument;
-  }
-  for (let index = 0; index < candidate.shadowPath.length; index += 1) {
-    const host = __geovisorPathNode(root, candidate.shadowPath[index]);
-    if (!host.shadowRoot) {
-      throw new Error("shadowPath[" + index + "] resolved to a host without an open shadow root");
-    }
-    root = host.shadowRoot;
-  }
-  const failures = [];
-  if (candidate.semantic) {
-    try {
-      return __geovisorSemantic(root, candidate.semantic);
-    } catch (error) {
-      failures.push("semantic: " + error.message);
-    }
-  }
-  if (candidate.cssFallback) {
-    try {
-      const match = root.querySelector(candidate.cssFallback);
-      if (match) return match;
-      failures.push("CSS " + JSON.stringify(candidate.cssFallback) + " matched no element");
-    } catch (error) {
-      failures.push("CSS " + JSON.stringify(candidate.cssFallback) + " is invalid: " + error.message);
-    }
-  }
-  throw new Error(failures.join("; ") || "candidate has no locator strategy");
-}
-
-function __geovisorResolve(definition, binding) {
-  const failures = [];
-  for (const locatorID of binding.locatorCandidateIds) {
-    const candidate = definition.locators.find((item) => item.id === locatorID);
-    if (!candidate) {
-      failures.push(locatorID + ": locator definition is missing");
-      continue;
-    }
-    try {
-      return __geovisorCandidate(candidate);
-    } catch (error) {
-      failures.push(locatorID + ": " + error.message);
-    }
-  }
-  throw new Error("all locator candidates failed (" + failures.join(" | ") + ")");
-}
-
-function __geovisorDispatch(element, name) {
-  const EventConstructor = element.ownerDocument.defaultView.Event;
-  element.dispatchEvent(new EventConstructor(name, { bubbles: true }));
-}
-
-function __geovisorApply(element, binding, value) {
-  if (binding.action === "click") {
-    if (typeof element.click !== "function") throw new Error("resolved element is not clickable");
-    element.click();
-    return;
-  }
-  if (binding.action === "fill") {
-    if (!("value" in element) && !element.isContentEditable) {
-      throw new Error("resolved element cannot accept text");
-    }
-    if (element.isContentEditable) element.textContent = String(value);
-    else element.value = String(value);
-    __geovisorDispatch(element, "input");
-    __geovisorDispatch(element, "change");
-    return;
-  }
-  if (binding.action === "select") {
-    if (element.localName !== "select") throw new Error("resolved element is not a select");
-    element.value = String(value);
-    if (element.value !== String(value)) throw new Error("requested option does not exist");
-    __geovisorDispatch(element, "input");
-    __geovisorDispatch(element, "change");
-    return;
-  }
-  if (binding.action === "check") {
-    if (element.localName !== "input" ||
-        !["checkbox", "radio"].includes((element.type || "").toLowerCase())) {
-      throw new Error("resolved element is not a checkbox or radio input");
-    }
-    element.checked = binding.inputParameter ? Boolean(value) : true;
-    __geovisorDispatch(element, "input");
-    __geovisorDispatch(element, "change");
-    return;
-  }
-  throw new Error("unsupported action " + JSON.stringify(binding.action));
-}
-
-async function __geovisorExecute(definition, input, signal) {
-  if (signal && signal.aborted) throw new DOMException("Tool execution was canceled", "AbortError");
-  for (let index = 0; index < definition.actions.length; index += 1) {
-    if (signal && signal.aborted) throw new DOMException("Tool execution was canceled", "AbortError");
-    const binding = definition.actions[index];
-    if (binding.inputParameter &&
-        !Object.prototype.hasOwnProperty.call(input, binding.inputParameter)) {
-      continue;
-    }
-    try {
-      const element = __geovisorResolve(definition, binding);
-      const value = binding.inputParameter ? input[binding.inputParameter] : undefined;
-      __geovisorApply(element, binding, value);
-    } catch (error) {
-      throw new Error(
-        "GEO-Visor tool " + JSON.stringify(definition.name) + " action[" + index + "] " +
-        JSON.stringify(binding.action) + " failed: " + error.message
-      );
-    }
-  }
-  return { content: [{ type: "text", text: "Executed " + definition.name }] };
-}
-
-export const geovisorRegistrations = [];
-for (const definition of __geovisorDefinitions) {
-  const registration = {
-    name: definition.name,
-    description: definition.description,
-    inputSchema: definition.inputSchema,
-    annotations: definition.annotations,
-    execute: async (input, options = {}) =>
-      __geovisorExecute(definition, input || {}, options.signal),
-  };
-  await document.modelContext.registerTool(registration);
-  geovisorRegistrations.push(registration);
-}
+const webMCPRegistration = `
+export const geovisorRegistrations = await __geovisorRuntime.register(__geovisorDefinitions);
 `

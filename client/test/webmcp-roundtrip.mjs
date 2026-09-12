@@ -121,6 +121,7 @@ async function executeModule() {
       error = messageOf(caught);
     }
     const changed = diff(before, snapshot(elements));
+    const resolved = unique([...changed, ...clicked, ...dispatched]);
     tools.push({
       name: registration.name,
       annotations: registration.annotations ?? null,
@@ -129,7 +130,10 @@ async function executeModule() {
       changed,
       clicked: unique(clicked),
       dispatched: unique(dispatched),
-      state: changed.map((index) => ({ index, ...describe(elements[index]) })),
+      // State is reported for every element the tool resolved to, not only the
+      // ones whose state changed, so an assertion can check the end state even
+      // when the requested state already held.
+      state: resolved.map((index) => ({ index, ...describe(elements[index]) })),
     });
   }
 
@@ -141,6 +145,8 @@ async function executeModule() {
 }
 
 function describe(element) {
+  const selected =
+    element.localName === "select" ? element.options[element.selectedIndex] : undefined;
   return {
     tag: element.localName,
     id: element.id || null,
@@ -149,6 +155,9 @@ function describe(element) {
     value: "value" in element ? String(element.value ?? "") : null,
     checked: "checked" in element ? Boolean(element.checked) : null,
     selectedIndex: element.localName === "select" ? element.selectedIndex : null,
+    // The advertised enum is built from option labels, so the label is what an
+    // assertion has to compare against.
+    selectedLabel: selected ? (selected.label || selected.textContent || "").trim() : null,
     text: element.isContentEditable ? element.textContent : null,
   };
 }
@@ -182,8 +191,11 @@ function inputFor(schema) {
 
 function valueFor(property) {
   if (Array.isArray(property.enum) && property.enum.length > 0) {
-    const first = property.enum.find((value) => value !== null);
-    return first ?? null;
+    // The *last* enum value, not the first: the first option of a <select> is
+    // already selected, so choosing it would let a tool that cannot change the
+    // selection at all still look like it worked.
+    const usable = property.enum.filter((value) => value !== null);
+    return usable.length > 0 ? usable[usable.length - 1] : null;
   }
   const types = Array.isArray(property.type) ? property.type : [property.type];
   if (types.includes("boolean")) return true;
