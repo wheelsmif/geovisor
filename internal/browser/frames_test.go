@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/go-rod/rod/lib/proto"
@@ -170,13 +171,7 @@ func TestFlattenCompleteFrameTreeIncludesOutOfProcessFrames(t *testing.T) {
 	trees := map[proto.PageFrameID]*proto.PageFrameTree{}
 	addUnattachedOOPIF(trees, &proto.TargetTargetInfo{
 		TargetID: "oopif", URL: "https://other.example/widget",
-	})
-	// An out-of-process frame reported without a parent cannot be placed in the
-	// tree, so it must still be discovered rather than dropped.
-	for id, tree := range trees {
-		tree.Frame.ParentID = "root"
-		trees[id] = tree
-	}
+	}, "root")
 
 	frames := flattenCompleteFrameTree(root, nil, nil, trees)
 
@@ -331,7 +326,7 @@ func TestAddUnattachedOOPIFRecordsOriginFromURL(t *testing.T) {
 	trees := map[proto.PageFrameID]*proto.PageFrameTree{}
 	addUnattachedOOPIF(trees, &proto.TargetTargetInfo{
 		TargetID: "widget", URL: "https://other.example/path?q=1#frag",
-	})
+	}, "root")
 
 	tree := trees["widget"]
 	if tree == nil || tree.Frame == nil {
@@ -342,6 +337,139 @@ func TestAddUnattachedOOPIFRecordsOriginFromURL(t *testing.T) {
 	}
 	if tree.Frame.SecurityOrigin != "https://other.example" {
 		t.Errorf("SecurityOrigin = %q, want https://other.example", tree.Frame.SecurityOrigin)
+	}
+	if tree.Frame.ParentID != "root" {
+		t.Errorf("ParentID = %q, want root", tree.Frame.ParentID)
+	}
+}
+
+func TestDiscoverOOPIFsRefetchesTargetsAfterParentAttach(t *testing.T) {
+	t.Parallel()
+
+	parent := &proto.TargetTargetInfo{TargetID: "parent", Type: "iframe", URL: "https://a.example/"}
+	child := &proto.TargetTargetInfo{
+		TargetID: "child", Type: "iframe", URL: "https://b.example/", OpenerFrameID: "parent",
+	}
+	calls := 0
+	list := func() ([]*proto.TargetTargetInfo, error) {
+		calls++
+		if calls == 1 {
+			return []*proto.TargetTargetInfo{parent}, nil
+		}
+		return []*proto.TargetTargetInfo{parent, child}, nil
+	}
+	var attached []string
+	attach := func(target *proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error) {
+		attached = append(attached, string(target.TargetID))
+		tree := &proto.PageFrameTree{Frame: &proto.PageFrame{
+			ID: proto.PageFrameID(target.TargetID), URL: target.URL,
+		}}
+		if target.TargetID == "parent" {
+			tree.ChildFrames = []*proto.PageFrameTree{{
+				Frame: &proto.PageFrame{ID: "child", ParentID: "parent"},
+			}}
+		}
+		return &sessionClient{}, tree, nil
+	}
+	root := &proto.PageFrameTree{
+		Frame:       &proto.PageFrame{ID: "root"},
+		ChildFrames: []*proto.PageFrameTree{{Frame: &proto.PageFrame{ID: "parent"}}},
+	}
+
+	_, trees, diagnostics := discoverOOPIFs("page", root, list, attach)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %+v", diagnostics)
+	}
+	if len(attached) != 2 || attached[0] != "parent" || attached[1] != "child" {
+		t.Fatalf("attached = %v, want parent then child", attached)
+	}
+	if trees["child"] == nil {
+		t.Fatal("nested OOPIF was not recorded after refetch")
+	}
+	if calls < 2 {
+		t.Fatalf("listTargets calls = %d, want at least 2", calls)
+	}
+}
+
+func TestDiscoverOOPIFsReportsGetTargetsFailure(t *testing.T) {
+	t.Parallel()
+
+	_, _, diagnostics := discoverOOPIFs(
+		"page",
+		&proto.PageFrameTree{Frame: &proto.PageFrame{ID: "root"}},
+		func() ([]*proto.TargetTargetInfo, error) { return nil, errors.New("cdp closed") },
+		func(*proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error) {
+			t.Fatal("attach should not run when listing targets fails")
+			return nil, nil, nil
+		},
+	)
+	if len(diagnostics) != 1 || diagnostics[0].Code != DiagnosticFrameUncovered {
+		t.Fatalf("diagnostics = %+v, want one frame_uncovered", diagnostics)
+	}
+	if !strings.Contains(diagnostics[0].Message, "could not list targets") {
+		t.Fatalf("message = %q", diagnostics[0].Message)
+	}
+}
+
+func TestCollectFrameOwnerOrderSkipsClosedShadowFrames(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.DOMNode{
+		FrameID: "root",
+		Children: []*proto.DOMNode{{
+			LocalName: "body",
+			Children: []*proto.DOMNode{
+				{
+					LocalName: "host",
+					ShadowRoots: []*proto.DOMNode{{
+						ShadowRootType: proto.DOMShadowRootTypeClosed,
+						Children: []*proto.DOMNode{
+							{LocalName: "iframe", FrameID: "closed"},
+						},
+					}},
+				},
+				{LocalName: "iframe", FrameID: "open"},
+			},
+		}},
+	}
+
+	got := map[proto.PageFrameID][]proto.PageFrameID{}
+	collectFrameOwnerOrder(got, root)
+	if !reflect.DeepEqual(got["root"], []proto.PageFrameID{"open"}) {
+		t.Fatalf("root children = %v, want [open] without the closed-shadow frame", got["root"])
+	}
+}
+
+func TestCollectFrameOwnerOrderCountsPresentationRoleIframes(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.DOMNode{
+		FrameID: "root",
+		Children: []*proto.DOMNode{
+			{LocalName: "iframe", FrameID: "presentational"},
+			{LocalName: "iframe", FrameID: "normal"},
+		},
+	}
+
+	got := map[proto.PageFrameID][]proto.PageFrameID{}
+	collectFrameOwnerOrder(got, root)
+	if !reflect.DeepEqual(got["root"], []proto.PageFrameID{"presentational", "normal"}) {
+		t.Fatalf("root children = %v, want presentational then normal", got["root"])
+	}
+}
+
+func TestPageURLStripsQueryAndFragment(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct{ raw, want string }{
+		{raw: "https://example.test/path?token=CURRENT-URL-SECRET#CURRENT-FRAGMENT-SECRET", want: "https://example.test/path"},
+		{raw: "http://example.test:8080/", want: "http://example.test:8080/"},
+		{raw: "about:blank", want: "about:blank"},
+		{raw: "", want: ""},
+	} {
+		if got := pageURL(test.raw); got != test.want {
+			t.Errorf("pageURL(%q) = %q, want %q", test.raw, got, test.want)
+		}
 	}
 }
 

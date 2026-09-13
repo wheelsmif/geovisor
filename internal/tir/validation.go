@@ -84,9 +84,15 @@ func validateDocument(d *Document) error {
 				if strings.TrimSpace(locator.Semantic.Role) == "" {
 					return invalid(locatorPath+".semantic.role", "required", "must not be empty")
 				}
+				if err := validateNth(locatorPath+".semantic.nth", locator.Semantic.Nth); err != nil {
+					return err
+				}
 				for si, node := range locator.Semantic.Scope {
 					if strings.TrimSpace(node.Role) == "" {
 						return invalid(fmt.Sprintf("%s.semantic.scope[%d].role", locatorPath, si), "required", "must not be empty")
+					}
+					if err := validateNth(fmt.Sprintf("%s.semantic.scope[%d].nth", locatorPath, si), node.Nth); err != nil {
+						return err
 					}
 				}
 			}
@@ -220,6 +226,18 @@ func validatePathNodes(field string, nodes []PathNode) error {
 		if node.Semantic != nil && strings.TrimSpace(node.Semantic.Role) == "" {
 			return invalid(path+".semantic.role", "required", "must not be empty")
 		}
+		if node.Semantic != nil {
+			if err := validateNth(path+".semantic.nth", node.Semantic.Nth); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateNth(field string, nth int) error {
+	if nth < 0 {
+		return invalid(field, "invalid_nth", "must be nonnegative")
 	}
 	return nil
 }

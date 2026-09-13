@@ -19,6 +19,7 @@ import {
   parentAcrossShadow,
   read,
   referencedText,
+  subtreeNameText,
 } from "./dom";
 
 export type NameSource =
@@ -78,7 +79,7 @@ function labelsText(element: Element): string {
   const labels = (element as HTMLInputElement).labels;
   return cleanText(
     Array.from(labels ?? [])
-      .map((label) => cleanText(label.textContent))
+      .map((label) => subtreeNameText(label, element))
       .filter(Boolean)
       .join(" "),
   );
@@ -92,8 +93,12 @@ function ownActionText(element: Element): string {
   ) {
     return cleanText(element.textContent);
   }
-  if (element.localName === "input" && inputType(element) === "image") {
-    return cleanText(element.getAttribute("alt"));
+  if (element.localName === "input") {
+    const type = inputType(element);
+    if (type === "image") return cleanText(element.getAttribute("alt"));
+    if (type === "submit" || type === "reset" || type === "button") {
+      return cleanText(element.getAttribute("value"));
+    }
   }
   return "";
 }
@@ -101,7 +106,7 @@ function ownActionText(element: Element): string {
 function adjacentText(element: Element): string {
   const before = element.previousElementSibling;
   if (before) {
-    const text = cleanText(before.textContent);
+    const text = subtreeNameText(before);
     if (text && text.length <= ADJACENT_TEXT_LIMIT) return text;
   }
   const parent = element.parentElement;

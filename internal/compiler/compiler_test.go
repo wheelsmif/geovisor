@@ -188,6 +188,22 @@ func TestCompileRejectsInvalidRawReferences(t *testing.T) {
 			code:  "invalid_provenance_kind",
 			field: "batches[0].interactions[0].evidence[0].kind",
 		},
+		{
+			name: "negative semantic nth",
+			mutate: func(input *Input) {
+				input.Batches[0].Interactions[0].Locators[0].Semantic.Nth = -1
+			},
+			code:  "invalid_nth",
+			field: "batches[0].interactions[0].locators[0].semantic.nth",
+		},
+		{
+			name: "negative scope nth",
+			mutate: func(input *Input) {
+				input.Batches[0].Interactions[0].Scope[0].Nth = -1
+			},
+			code:  "invalid_nth",
+			field: "batches[0].interactions[0].scope[0].nth",
+		},
 	}
 	for _, test := range tests {
 		test := test
@@ -331,6 +347,61 @@ func TestCompileHonorsCanceledContext(t *testing.T) {
 	var compilerError *Error
 	if !errors.As(err, &compilerError) || compilerError.Code != "canceled" {
 		t.Fatalf("error = %T %v, want canceled compiler error", err, err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled compile must unwrap to context.Canceled, got %v", err)
+	}
+}
+
+func TestCompileIdentityIgnoresDisplayNameOrdinals(t *testing.T) {
+	t.Parallel()
+
+	control := func(name string, nth int) observation.Interaction {
+		return observation.Interaction{
+			Kind:  observation.InteractionControl,
+			Role:  "textbox",
+			Name:  name,
+			Scope: []observation.SemanticNode{{Role: "region", Name: "Filters"}},
+			Parameters: []observation.Parameter{
+				{Name: "query", Type: observation.ValueString},
+			},
+			Locators: []observation.Locator{{
+				Semantic: &observation.SemanticLocator{
+					Scope: []observation.SemanticNode{{Role: "region", Name: "Filters"}},
+					Role:  "textbox",
+					Name:  "Query",
+					Nth:   nth,
+				},
+				Evidence: []observation.Evidence{{Kind: observation.EvidenceAccessibility, Reference: "ax", Score: 0.9}},
+			}},
+			Actions: []observation.Action{{
+				Kind: observation.ActionFill, InputParameter: "query",
+				SideEffect: observation.SideEffect{Class: observation.SideEffectUnknown},
+			}},
+			Evidence: []observation.Evidence{{Kind: observation.EvidenceAccessibility, Reference: "ax", Score: 0.9}},
+		}
+	}
+	compileNames := func(first, second observation.Interaction) [2]string {
+		t.Helper()
+		document, err := Compile(context.Background(), Input{
+			Source: observation.Source{Kind: observation.SourceLaunchURL},
+			Batches: []observation.Batch{{
+				Interactions: []observation.Interaction{first, second},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("compile: %v", err)
+		}
+		if len(document.Tools) != 2 {
+			t.Fatalf("tools = %d, want 2", len(document.Tools))
+		}
+		return [2]string{document.Tools[0].ID, document.Tools[1].ID}
+	}
+
+	baseline := compileNames(control("Query", 0), control("Query (2)", 1))
+	renamed := compileNames(control("Query (2)", 0), control("Query (3)", 1))
+	if baseline != renamed {
+		t.Fatalf("display-name ordinals changed IDs: %v vs %v", baseline, renamed)
 	}
 }
 

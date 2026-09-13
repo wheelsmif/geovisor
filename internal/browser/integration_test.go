@@ -35,7 +35,7 @@ func TestLaunchObservesNestedShadowAndCrossOriginFrames(t *testing.T) {
 		writer.Header().Set("Content-Type", "text/html")
 		name := strings.TrimPrefix(request.URL.Path, "/")
 		if name == "" {
-			name = "frames.html"
+			name = "nested-shadow-cross.html"
 		}
 		data := strings.ReplaceAll(string(corpusFixture(t, name)), "{{CROSS_ORIGIN}}", crossURL)
 		_, _ = io.WriteString(writer, data)
@@ -64,7 +64,7 @@ func TestLaunchObservesNestedShadowAndCrossOriginFrames(t *testing.T) {
 	}
 	assertInteraction(t, batch.Interactions, "Root action", 0)
 	assertInteraction(t, batch.Interactions, "Nested frame action", 1)
-	assertInteraction(t, batch.Interactions, "Recovered field Submit recovered form", 2)
+	assertInteraction(t, batch.Interactions, "Submit recovered form", 2)
 
 	shadow := findInteraction(batch.Interactions, "Shadow action")
 	if shadow == nil || len(shadow.Locators) == 0 || len(shadow.Locators[0].ShadowPath) == 0 {
@@ -167,7 +167,7 @@ func TestAttachPreservesBrowserAndDoesNotNavigate(t *testing.T) {
 	if navigated.ErrorText != "" {
 		t.Fatalf("navigate fixture target: %s", navigated.ErrorText)
 	}
-	if err := waitForDocumentReady(context.Background(), session); err != nil {
+	if err := waitForDocumentReady(context.Background(), session, navigated.LoaderID); err != nil {
 		t.Fatalf("wait fixture target: %v", err)
 	}
 	detachTarget(connection.browser, session.sessionID)

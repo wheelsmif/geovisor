@@ -29,14 +29,25 @@ the wrong frame rather than report that it cannot resolve.
 
 It supports click, fill, select, and check bindings, checks cancellation between
 actions, and reports the tool, action index, action kind, and locator failures
-when execution fails. Cross-origin frame DOM access and closed shadow roots
-cannot be bypassed by page JavaScript; bindings that encounter either boundary
-fail explicitly. The emitter honors `Options.Strict` on each tool's `inputSchema` the same way
-as the other schema-emitting lanes. It still rejects actions with no locator
-candidate, because those cannot be executed in page JavaScript.
+when execution fails. Fill and check assign through the element's native
+prototype setter when the owning window exposes one, then dispatch a bubbling
+`InputEvent` (and `change`). That is enough for many framework-controlled
+inputs; it is not a React-specific adapter, and a library that ignores native
+setters and synthetic input events can still miss the update.
 
-WebMCP annotations use the Chrome 153 names. `readOnlyHint` is true only when
-all actions have side effect `none`; `consequentialHint` is true for network,
+The emitter does not register a tool whose remaining locators cannot be resolved
+in page JavaScript: a cross-origin frame path (different origin from the page
+URL) or a path that is only in `frameCoverage.uncovered` (including
+closed-shadow-hosted frames) is omitted. TIR still describes that frame; MCP and
+OpenAI definitions may still list the tool as a recipe. Cross-origin frame DOM
+access and closed shadow roots cannot be bypassed by page JavaScript; a binding
+that still encounters either boundary fails explicitly. The emitter honors `Options.Strict` on each tool's
+`inputSchema` the same way as the other schema-emitting lanes. It still rejects
+actions with no locator candidate, because those cannot be executed in page
+JavaScript. A missing required parameter throws before later actions run.
+
+WebMCP annotations use the Chrome 153 names. `readOnlyHint` is never true for a
+click, fill, check, or select action. `consequentialHint` is true for network,
 navigation, submission, or unknown effects. `untrustedContentHint` is true
 because tool names and descriptions originate in page text and must be treated
 as untrusted model input.

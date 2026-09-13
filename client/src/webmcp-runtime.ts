@@ -65,6 +65,13 @@ async function executeTool(
   signal: AbortSignal | undefined,
 ): Promise<unknown> {
   throwIfAborted(signal);
+  for (const name of requiredParameters(definition.inputSchema)) {
+    if (!Object.prototype.hasOwnProperty.call(input, name)) {
+      throw new Error(
+        `GEO-Visor tool ${JSON.stringify(definition.name)} is missing required parameter ${JSON.stringify(name)}`,
+      );
+    }
+  }
   for (let index = 0; index < definition.actions.length; index += 1) {
     throwIfAborted(signal);
     const binding = definition.actions[index]!;
@@ -86,6 +93,13 @@ async function executeTool(
     }
   }
   return { content: [{ type: "text", text: `Executed ${definition.name}` }] };
+}
+
+function requiredParameters(schema: unknown): string[] {
+  if (!schema || typeof schema !== "object") return [];
+  const required = (schema as { required?: unknown }).required;
+  if (!Array.isArray(required)) return [];
+  return required.filter((item): item is string => typeof item === "string");
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -111,10 +125,52 @@ function resolve(definition: ToolDefinition, binding: ActionBinding): Element {
   throw new Error(`all locator candidates failed (${failures.join(" | ")})`);
 }
 
-function dispatch(element: Element, name: string): void {
+function ownerView(element: Element): Window {
   const view = element.ownerDocument.defaultView;
   if (!view) throw new Error("resolved element has no window to dispatch events in");
-  element.dispatchEvent(new view.Event(name, { bubbles: true }));
+  return view;
+}
+
+function prototypeName(element: Element): string {
+  const tag = element.localName;
+  if (tag === "textarea") return "HTMLTextAreaElement";
+  if (tag === "select") return "HTMLSelectElement";
+  if (tag === "input") return "HTMLInputElement";
+  return "HTMLElement";
+}
+
+function setNativeProperty(element: Element, property: string, value: unknown): void {
+  const view = ownerView(element) as unknown as Record<string, { prototype?: object } | undefined>;
+  const proto = view[prototypeName(element)]?.prototype;
+  const setter = proto
+    ? Object.getOwnPropertyDescriptor(proto, property)?.set
+    : undefined;
+  if (setter) {
+    setter.call(element, value);
+    return;
+  }
+  (element as unknown as Record<string, unknown>)[property] = value;
+}
+
+function viewEvent(view: Window): new (type: string, init?: EventInit) => Event {
+  return (view as unknown as { Event: new (type: string, init?: EventInit) => Event }).Event;
+}
+
+function dispatch(element: Element, name: string): void {
+  const view = ownerView(element);
+  const EventCtor = viewEvent(view);
+  element.dispatchEvent(new EventCtor(name, { bubbles: true }));
+}
+
+function dispatchInput(element: Element): void {
+  const view = ownerView(element);
+  const InputEventCtor = (view as unknown as { InputEvent?: typeof InputEvent }).InputEvent;
+  if (typeof InputEventCtor === "function") {
+    element.dispatchEvent(new InputEventCtor("input", { bubbles: true }));
+    return;
+  }
+  const EventCtor = viewEvent(view);
+  element.dispatchEvent(new EventCtor("input", { bubbles: true }));
 }
 
 function apply(element: Element, binding: ActionBinding, value: unknown): void {
@@ -147,14 +203,15 @@ function applyClick(element: Element): void {
 }
 
 function applyFill(element: Element, value: unknown): void {
+  const text = String(value);
   if ("value" in element) {
-    (element as HTMLInputElement).value = String(value);
+    setNativeProperty(element, "value", text);
   } else if (isContentEditable(element)) {
-    element.textContent = String(value);
+    element.textContent = text;
   } else {
     throw new Error("resolved element cannot accept text");
   }
-  dispatch(element, "input");
+  dispatchInput(element);
   dispatch(element, "change");
 }
 
@@ -177,8 +234,8 @@ function applySelect(element: Element, value: unknown): void {
   if (index < 0) {
     throw new Error(`no option labelled ${JSON.stringify(wanted)} exists`);
   }
-  select.selectedIndex = index;
-  dispatch(element, "input");
+  setNativeProperty(select, "selectedIndex", index);
+  dispatchInput(element);
   dispatch(element, "change");
 }
 
@@ -190,7 +247,7 @@ function applyCheck(element: Element, binding: ActionBinding, value: unknown): v
   ) {
     throw new Error("resolved element is not a checkbox or radio input");
   }
-  input.checked = binding.inputParameter ? Boolean(value) : true;
-  dispatch(element, "input");
+  setNativeProperty(input, "checked", binding.inputParameter ? Boolean(value) : true);
+  dispatchInput(element);
   dispatch(element, "change");
 }

@@ -22,7 +22,7 @@ the TIR required list exactly.
 
 Annotations are conservative aggregates over every action:
 
-- `readOnlyHint` is true only when every action has side effect `none`.
+- `readOnlyHint` is never true for a click, fill, check, or select action.
 - `destructiveHint` is true for any non-read-only tool.
 - `idempotentHint` is true only for read-only tools.
 - `openWorldHint` is true for network, navigation, submission, or unknown

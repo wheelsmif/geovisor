@@ -74,6 +74,14 @@ required only on the Ubuntu Quality leg). `verify-release` and the six-archive
 checksums run in the Source cross-build job. Chromium-backed packages also run
 in the dedicated Browser job, which asserts `google-chrome --version` first.
 
+Browser CI uses the Chrome binary that ships on the GitHub-hosted runner image
+on purpose. This pass does not add a third-party `setup-chrome` action: pinning
+a downloaded browser would add supply-chain surface the project is not taking.
+The `google-chrome --version` step is required so a missing image browser fails
+loudly instead of skipping. Chrome version drift across runner images is an
+accepted risk; record a fixture or protocol break against a specific version
+when one appears.
+
 Create all six local platform archives with:
 
 ```sh

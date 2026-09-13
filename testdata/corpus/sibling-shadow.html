@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>GEO-Visor sibling open-shadow hosts</title>
+  </head>
+  <body>
+    <!--
+      Two unnamed sibling hosts inside one open shadow. Bare-tag CSS would
+      resolve both tools to the first host (P19). Unique shadow-path CSS must
+      keep Alpha and Beta on different buttons.
+    -->
+    <div id="outer">
+      <template shadowrootmode="open">
+        <div>
+          <template shadowrootmode="open">
+            <button aria-label="Alpha">Alpha</button>
+          </template>
+        </div>
+        <div>
+          <template shadowrootmode="open">
+            <button aria-label="Beta">Beta</button>
+          </template>
+        </div>
+      </template>
+    </div>
+  </body>
+</html>

@@ -29,6 +29,10 @@ var sensitiveSentinels = []string{
 	"HIDDEN-PRO-ID",
 	"CURRENT-URL-SECRET",
 	"CURRENT-FRAGMENT-SECRET",
+	"TEXTAREA-SECRET",
+	"LABELLEDBY-SECRET",
+	"DESCRIBED-SECRET",
+	"INPUT-SECRET",
 }
 
 func TestPayloadCompilerEmitterPipeline(t *testing.T) {
@@ -39,8 +43,8 @@ func TestPayloadCompilerEmitterPipeline(t *testing.T) {
 	input := compiler.Input{
 		Source: observation.Source{
 			Kind:         observation.SourceLaunchURL,
-			RequestedURL: "https://corpus.example/forms",
-			FinalURL:     "https://corpus.example/forms",
+			RequestedURL: "https://corpus.example/forms?token=CURRENT-URL-SECRET#CURRENT-FRAGMENT-SECRET",
+			FinalURL:     "https://corpus.example/forms?token=CURRENT-URL-SECRET#CURRENT-FRAGMENT-SECRET",
 		},
 		Batches: []observation.Batch{batch},
 	}

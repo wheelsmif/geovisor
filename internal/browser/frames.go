@@ -41,6 +41,9 @@ type discoveredFrame struct {
 	frame   *proto.PageFrame
 	path    []observation.FrameReference
 	session *sessionClient
+	// reason, when set, marks the frame uncovered without extracting tools.
+	// Closed-shadow-hosted frames are page-JS-unaddressable (P7, P9).
+	reason string
 }
 
 func observeTarget(
@@ -53,6 +56,7 @@ func observeTarget(
 	if err := (proto.PageEnable{}).Call(rootSession); err != nil {
 		return Result{}, operationError(ctx, ErrorReadiness, "page.enable", "enable page observation", err)
 	}
+	var loaderID proto.NetworkLoaderID
 	if options.navigate {
 		response, err := (proto.PageNavigate{URL: options.requestedURL}).Call(rootSession)
 		if err != nil {
@@ -64,8 +68,9 @@ func observeTarget(
 				errors.New(response.ErrorText), options.requestedURL,
 			)
 		}
+		loaderID = response.LoaderID
 	}
-	if err := waitForDocumentReady(ctx, rootSession); err != nil {
+	if err := waitForDocumentReady(ctx, rootSession, loaderID); err != nil {
 		return Result{}, operationError(ctx, ErrorReadiness, "page.load", "wait for document load", err)
 	}
 
@@ -87,8 +92,9 @@ func observeTarget(
 		return result, operationError(ctx, ErrorFrameDiscovery, "frames.tree", "read browser frame tree", err)
 	}
 
-	oopifSessions, oopifTrees, detach := attachOOPIFSessions(ctx, browser, targetID, tree.FrameTree)
+	oopifSessions, oopifTrees, oopifDiagnostics, detach := attachOOPIFSessions(ctx, browser, targetID, tree.FrameTree)
 	defer detach()
+	result.Diagnostics = append(result.Diagnostics, oopifDiagnostics...)
 	frames := flattenCompleteFrameTree(tree.FrameTree, rootSession, oopifSessions, oopifTrees)
 	batch := observation.Batch{
 		CoverageReported: true,
@@ -101,7 +107,7 @@ func observeTarget(
 		fact := observation.Frame{
 			Path:       cloneFramePath(frame.path),
 			Accessible: true,
-			URL:        frame.frame.URL,
+			URL:        pageURL(frame.frame.URL),
 			Origin:     frame.frame.SecurityOrigin,
 		}
 		extracted, code, reason := extractFrame(frame, options.extraction, options.frameTimeout)
@@ -175,16 +181,12 @@ func evaluateIsolated(
 	return params.Call(session)
 }
 
-func waitForDocumentReady(ctx context.Context, session *sessionClient) error {
+func waitForDocumentReady(ctx context.Context, session *sessionClient, loaderID proto.NetworkLoaderID) error {
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		frameID, err := sessionMainFrameID(session)
-		if err == nil {
-			result, evalErr := evaluateIsolated(session, frameID, "document.readyState === 'complete'", false, 0)
-			if evalErr == nil && result.ExceptionDetails == nil && result.Result != nil && result.Result.Value.Bool() {
-				return nil
-			}
+		if ready, err := documentMatchesNavigation(session, loaderID); err == nil && ready {
+			return nil
 		}
 		select {
 		case <-ctx.Done():
@@ -192,6 +194,39 @@ func waitForDocumentReady(ctx context.Context, session *sessionClient) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// documentMatchesNavigation reports whether the session's main document is
+// complete and, after a Page.navigate, belongs to that navigation rather than
+// the launch about:blank that is already complete.
+func documentMatchesNavigation(session *sessionClient, loaderID proto.NetworkLoaderID) (bool, error) {
+	frameID, err := sessionMainFrameID(session)
+	if err != nil {
+		return false, err
+	}
+	result, err := evaluateIsolated(session, frameID, "document.readyState === 'complete'", false, 0)
+	if err != nil || result.ExceptionDetails != nil || result.Result == nil || !result.Result.Value.Bool() {
+		return false, err
+	}
+	if loaderID == "" {
+		return true, nil
+	}
+	tree, err := (proto.PageGetFrameTree{}).Call(session)
+	if err != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
+		return false, err
+	}
+	frame := tree.FrameTree.Frame
+	if frame.LoaderID == loaderID {
+		return true, nil
+	}
+	// A redirect commits a different loader than Page.navigate returned. Accept
+	// that committed document once it is no longer the pre-navigation blank.
+	return frame.LoaderID != "" && !isAboutBlankURL(frame.URL), nil
+}
+
+func isAboutBlankURL(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	return trimmed == "" || trimmed == "about:blank"
 }
 
 func waitForDOMQuiet(
@@ -237,63 +272,104 @@ func attachOOPIFSessions(
 ) (
 	map[proto.PageFrameID]*sessionClient,
 	map[proto.PageFrameID]*proto.PageFrameTree,
+	[]Diagnostic,
 	func(),
 ) {
-	result := make(map[proto.PageFrameID]*sessionClient)
-	trees := make(map[proto.PageFrameID]*proto.PageFrameTree)
 	var attached []*sessionClient
-	allowed := descendantFrameIDs(rootTree)
-	seen := make(map[proto.TargetTargetID]struct{})
-	targets, err := (proto.TargetGetTargets{}).Call(browser.Context(ctx))
-	if err == nil {
-		sort.Slice(targets.TargetInfos, func(i, j int) bool {
-			if targets.TargetInfos[i].URL != targets.TargetInfos[j].URL {
-				return targets.TargetInfos[i].URL < targets.TargetInfos[j].URL
+	sessions, trees, diagnostics := discoverOOPIFs(
+		rootTargetID,
+		rootTree,
+		func() ([]*proto.TargetTargetInfo, error) {
+			targets, err := (proto.TargetGetTargets{}).Call(browser.Context(ctx))
+			if err != nil {
+				return nil, err
 			}
-			return targets.TargetInfos[i].TargetID < targets.TargetInfos[j].TargetID
-		})
-		// Nested OOPIFs may appear only after a parent OOPIF is attached, so
-		// repeat until a pass attaches nothing new.
-		for progress := true; progress; {
-			progress = false
-			for _, target := range targets.TargetInfos {
-				if _, done := seen[target.TargetID]; done {
-					continue
-				}
-				if !isDescendantIFrameTarget(allowed, rootTargetID, target) {
-					continue
-				}
-				seen[target.TargetID] = struct{}{}
-				progress = true
-				attachContext, cancel := context.WithTimeout(ctx, defaultDOMQuietLimit)
-				session, attachErr := attachTarget(attachContext, browser, target.TargetID)
-				if attachErr != nil {
-					cancel()
-					addUnattachedOOPIF(trees, target)
-					continue
-				}
-				tree, treeErr := (proto.PageGetFrameTree{}).Call(session)
-				session.ctx = ctx
-				cancel()
-				if treeErr != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
-					detachTarget(browser, session.sessionID)
-					addUnattachedOOPIF(trees, target)
-					continue
-				}
-				result[tree.FrameTree.Frame.ID] = session
-				trees[tree.FrameTree.Frame.ID] = tree.FrameTree
-				attached = append(attached, session)
-				for frameID := range descendantFrameIDs(tree.FrameTree) {
-					allowed[frameID] = struct{}{}
-				}
+			return targets.TargetInfos, nil
+		},
+		func(target *proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error) {
+			attachContext, cancel := context.WithTimeout(ctx, defaultDOMQuietLimit)
+			defer cancel()
+			session, attachErr := attachTarget(attachContext, browser, target.TargetID)
+			if attachErr != nil {
+				return nil, nil, attachErr
 			}
-		}
-	}
-	return result, trees, func() {
+			tree, treeErr := (proto.PageGetFrameTree{}).Call(session)
+			session.ctx = ctx
+			if treeErr != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
+				detachTarget(browser, session.sessionID)
+				if treeErr == nil {
+					treeErr = errors.New("page frame tree is empty")
+				}
+				return nil, nil, treeErr
+			}
+			attached = append(attached, session)
+			return session, tree.FrameTree, nil
+		},
+	)
+	return sessions, trees, diagnostics, func() {
 		for index := len(attached) - 1; index >= 0; index-- {
 			detachTarget(browser, attached[index].sessionID)
 		}
 	}
+}
+
+// discoverOOPIFs attaches descendant iframe targets, refetching the target list
+// after each successful attach so nested OOPIFs created by that attach can
+// enter a later pass (P8).
+func discoverOOPIFs(
+	rootTargetID proto.TargetTargetID,
+	rootTree *proto.PageFrameTree,
+	listTargets func() ([]*proto.TargetTargetInfo, error),
+	attach func(*proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error),
+) (
+	map[proto.PageFrameID]*sessionClient,
+	map[proto.PageFrameID]*proto.PageFrameTree,
+	[]Diagnostic,
+) {
+	result := make(map[proto.PageFrameID]*sessionClient)
+	trees := make(map[proto.PageFrameID]*proto.PageFrameTree)
+	var diagnostics []Diagnostic
+	allowed := descendantFrameIDs(rootTree)
+	seen := make(map[proto.TargetTargetID]struct{})
+	for progress := true; progress; {
+		progress = false
+		targets, err := listTargets()
+		if err != nil {
+			diagnostics = append(diagnostics, Diagnostic{
+				Code:     DiagnosticFrameUncovered,
+				Severity: SeverityWarning,
+				Message:  "browser could not list targets for out-of-process frames: " + err.Error(),
+			})
+			break
+		}
+		sort.Slice(targets, func(i, j int) bool {
+			if targets[i].URL != targets[j].URL {
+				return targets[i].URL < targets[j].URL
+			}
+			return targets[i].TargetID < targets[j].TargetID
+		})
+		for _, target := range targets {
+			if _, done := seen[target.TargetID]; done {
+				continue
+			}
+			if !isDescendantIFrameTarget(allowed, rootTargetID, target) {
+				continue
+			}
+			seen[target.TargetID] = struct{}{}
+			progress = true
+			session, tree, attachErr := attach(target)
+			if attachErr != nil || tree == nil || tree.Frame == nil {
+				addUnattachedOOPIF(trees, target, parentFrameID(rootTree, trees, proto.PageFrameID(target.TargetID)))
+				continue
+			}
+			result[tree.Frame.ID] = session
+			trees[tree.Frame.ID] = tree
+			for frameID := range descendantFrameIDs(tree) {
+				allowed[frameID] = struct{}{}
+			}
+		}
+	}
+	return result, trees, diagnostics
 }
 
 func descendantFrameIDs(tree *proto.PageFrameTree) map[proto.PageFrameID]struct{} {
@@ -327,11 +403,51 @@ func isDescendantIFrameTarget(
 func addUnattachedOOPIF(
 	trees map[proto.PageFrameID]*proto.PageFrameTree,
 	target *proto.TargetTargetInfo,
+	parentID proto.PageFrameID,
 ) {
 	frameID := proto.PageFrameID(target.TargetID)
+	if parentID == "" {
+		parentID = target.OpenerFrameID
+	}
 	trees[frameID] = &proto.PageFrameTree{Frame: &proto.PageFrame{
-		ID: frameID, URL: target.URL, SecurityOrigin: originForURL(target.URL),
+		ID: frameID, ParentID: parentID, URL: target.URL, SecurityOrigin: originForURL(target.URL),
 	}}
+}
+
+func parentFrameID(
+	root *proto.PageFrameTree,
+	extra map[proto.PageFrameID]*proto.PageFrameTree,
+	child proto.PageFrameID,
+) proto.PageFrameID {
+	if found := findParentFrameID(root, child); found != "" {
+		return found
+	}
+	ids := make([]proto.PageFrameID, 0, len(extra))
+	for id := range extra {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		if found := findParentFrameID(extra[id], child); found != "" {
+			return found
+		}
+	}
+	return ""
+}
+
+func findParentFrameID(node *proto.PageFrameTree, child proto.PageFrameID) proto.PageFrameID {
+	if node == nil || node.Frame == nil {
+		return ""
+	}
+	for _, next := range node.ChildFrames {
+		if next != nil && next.Frame != nil && next.Frame.ID == child {
+			return node.Frame.ID
+		}
+		if found := findParentFrameID(next, child); found != "" {
+			return found
+		}
+	}
+	return ""
 }
 
 func originForURL(raw string) string {
@@ -340,6 +456,30 @@ func originForURL(raw string) string {
 		return ""
 	}
 	return parsed.Scheme + "://" + parsed.Host
+}
+
+// pageURL keeps scheme, host, and path and drops query and fragment so tokens
+// in iframe src and source URLs cannot enter TIR (P12).
+func pageURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return trimmed
+	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	if parsed.Host == "" {
+		return parsed.String()
+	}
+	path := parsed.EscapedPath()
+	if path == "" && parsed.Scheme != "" {
+		path = ""
+	}
+	return parsed.Scheme + "://" + parsed.Host + path
 }
 
 func flattenCompleteFrameTree(
@@ -386,8 +526,8 @@ func flattenCompleteFrameTree(
 
 	result := make([]discoveredFrame, 0, len(frames))
 	visited := make(map[proto.PageFrameID]bool)
-	var visit func(proto.PageFrameID, []observation.FrameReference, *sessionClient)
-	visit = func(frameID proto.PageFrameID, path []observation.FrameReference, inherited *sessionClient) {
+	var visit func(proto.PageFrameID, []observation.FrameReference, *sessionClient, string)
+	visit = func(frameID proto.PageFrameID, path []observation.FrameReference, inherited *sessionClient, reason string) {
 		frame := frames[frameID]
 		if frame == nil || visited[frameID] {
 			return
@@ -398,7 +538,7 @@ func flattenCompleteFrameTree(
 			session = oopif
 		}
 		result = append(result, discoveredFrame{
-			frame: frame, path: cloneFramePath(path), session: session,
+			frame: frame, path: cloneFramePath(path), session: session, reason: reason,
 		})
 
 		ordered := append([]proto.PageFrameID{}, ownerOrder[frameID]...)
@@ -415,6 +555,9 @@ func flattenCompleteFrameTree(
 		}
 		sort.Slice(extras, func(i, j int) bool {
 			left, right := frames[extras[i]], frames[extras[j]]
+			if left == nil || right == nil {
+				return extras[i] < extras[j]
+			}
 			if left.URL != right.URL {
 				return left.URL < right.URL
 			}
@@ -423,6 +566,7 @@ func flattenCompleteFrameTree(
 			}
 			return extras[i] < extras[j]
 		})
+		ownerCount := len(ordered)
 		ordered = append(ordered, extras...)
 		for index, childID := range ordered {
 			child := frames[childID]
@@ -430,12 +574,16 @@ func flattenCompleteFrameTree(
 				continue
 			}
 			childPath := append(cloneFramePath(path), observation.FrameReference{
-				Index: index, Name: child.Name, Src: child.URL,
+				Index: index, Name: child.Name, Src: pageURL(child.URL),
 			})
-			visit(childID, childPath, session)
+			childReason := reason
+			if index >= ownerCount && childReason == "" {
+				childReason = "frame is not visible to page JavaScript (closed shadow or equivalent)"
+			}
+			visit(childID, childPath, session, childReason)
 		}
 	}
-	visit(root.Frame.ID, []observation.FrameReference{}, rootSession)
+	visit(root.Frame.ID, []observation.FrameReference{}, rootSession, "")
 	return result
 }
 
@@ -459,10 +607,12 @@ func mergeFrameOwnerOrder(
 // CDP call so the ordering contract can be tested without a browser (GV-037).
 //
 // The walk is the Go counterpart of `frameCandidates` in client/src/shared/locate.ts:
-// pre-order, light children before shadow content, and no descent past a frame,
-// whose contents belong to a different document. The two implementations are
-// what keep FrameReference.Index and a runtime frame path node pointing at the
-// same element (GV-003).
+// pre-order, light children before open-shadow content, localName iframe|frame
+// (not computed role), and no descent past a frame, whose contents belong to a
+// different document. Closed shadow trees are skipped so they do not consume an
+// index the page-JS walk cannot see (P9). The two implementations are what keep
+// FrameReference.Index and a runtime frame path node pointing at the same
+// element (GV-003).
 func collectFrameOwnerOrder(target map[proto.PageFrameID][]proto.PageFrameID, root *proto.DOMNode) {
 	if root == nil {
 		return
@@ -495,6 +645,9 @@ func collectFrameOwnerOrder(target map[proto.PageFrameID][]proto.PageFrameID, ro
 			walkContent(child, documentFrameID)
 		}
 		for _, shadow := range node.ShadowRoots {
+			if shadow != nil && shadow.ShadowRootType == proto.DOMShadowRootTypeClosed {
+				continue
+			}
 			walkContent(shadow, documentFrameID)
 		}
 		if node.ContentDocument != nil {
@@ -524,6 +677,13 @@ func extractFrame(
 	options ExtractionOptions,
 	frameTimeout time.Duration,
 ) (observation.Batch, DiagnosticCode, string) {
+	if frame.reason != "" {
+		return observation.Batch{}, DiagnosticFrameUncovered, frame.reason
+	}
+	if frame.session == nil {
+		return observation.Batch{}, DiagnosticFrameUncovered,
+			"browser has no session for this frame"
+	}
 	if frameTimeout <= 0 {
 		frameTimeout = defaultFrameTimeout(explorationBudget(options.TimeoutMS))
 	}

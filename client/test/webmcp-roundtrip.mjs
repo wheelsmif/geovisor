@@ -224,21 +224,36 @@ async function executeModule() {
   // is more precise than diffing state -- setting a checkbox that is already
   // checked resolves correctly while changing nothing.
   const clicked = [];
+  const submitted = [];
   const dispatched = [];
+  const inputEvents = [];
   for (const scope of collectDocuments(document)) {
     scope.addEventListener(
       "click",
       (event) => {
-        clicked.push(indexOf(event.target));
+        const target = composedTarget(event);
+        clicked.push(indexOf(target));
+        if (isSubmitControl(target)) {
+          submitted.push({
+            index: indexOf(target),
+            name: submitName(target),
+          });
+        }
         // Cancel navigation and submission: the driver observes which element
         // was clicked, it does not exercise what the page would do next.
         event.preventDefault();
       },
       true,
     );
-    for (const name of ["input", "change"]) {
-      scope.addEventListener(name, (event) => dispatched.push(indexOf(event.target)), true);
-    }
+    scope.addEventListener(
+      "input",
+      (event) => {
+        dispatched.push(indexOf(composedTarget(event)));
+        inputEvents.push(event.constructor?.name ?? "");
+      },
+      true,
+    );
+    scope.addEventListener("change", (event) => dispatched.push(indexOf(composedTarget(event))), true);
   }
 
   const registrations = [];
@@ -262,7 +277,9 @@ async function executeModule() {
   for (const registration of registrations) {
     const before = snapshot(elements);
     clicked.length = 0;
+    submitted.length = 0;
     dispatched.length = 0;
+    inputEvents.length = 0;
     const input = inputFor(registration.inputSchema);
     let error = null;
     try {
@@ -279,7 +296,9 @@ async function executeModule() {
       error,
       changed,
       clicked: unique(clicked),
+      submitted: submitted.map((item) => ({ ...item })),
       dispatched: unique(dispatched),
+      inputEvents: [...inputEvents],
       // State is reported for every element the tool resolved to, not only the
       // ones whose state changed, so an assertion can check the end state even
       // when the requested state already held.
@@ -292,6 +311,39 @@ async function executeModule() {
     elements: elements.map((element, index) => ({ index, ...describe(element) })),
     tools,
   };
+}
+
+// Shadow-retargeted events expose the host as event.target when observed
+// from the document. composedPath keeps the originating node so Alpha/Beta
+// (and other shadow tools) are not reported as the same host click (P19).
+function composedTarget(event) {
+  const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+  for (const node of path) {
+    if (node && node.nodeType === 1) return node;
+  }
+  return event.target;
+}
+
+function isSubmitControl(element) {
+  if (!element || element.nodeType !== 1) return false;
+  if (element.localName === "button") {
+    const type = (element.getAttribute("type") || "submit").toLowerCase();
+    return type === "submit" || type === "image";
+  }
+  if (element.localName === "input") {
+    const type = (element.getAttribute("type") || "text").toLowerCase();
+    return type === "submit" || type === "image";
+  }
+  return false;
+}
+
+function submitName(element) {
+  return (
+    element.getAttribute("aria-label") ||
+    element.getAttribute("value") ||
+    (element.textContent || "").trim() ||
+    element.localName
+  );
 }
 
 function describe(element) {

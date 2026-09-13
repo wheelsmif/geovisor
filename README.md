@@ -104,8 +104,11 @@ geovisor inspect --cdp http://127.0.0.1:9222 --target active \
 
 Targets are `active`, `id:<id>`, or `url:<exact-http(s)-url>`. `--target active`
 selects the only top-level HTTP(S) page; if more than one is open, pass `id:`
-or `url:` so attach never touches another tab. Attach mode disconnects only
-GEO-Visor's CDP transport; it does not close the existing browser or target.
+or `url:` so attach never touches another tab. It never treats `about:blank` or
+`chrome://` as that page. A fresh Chrome window that only shows a new tab
+therefore has zero HTTP(S) pages, and the error says so. Attach mode
+disconnects only GEO-Visor's CDP transport; it does not close the existing
+browser or target.
 
 ## Safety and runtime controls
 
@@ -132,11 +135,11 @@ stderr while partial artifacts still succeed.
 Extraction is local and deterministic: GEO-Visor does not call an LLM, vision
 service, telemetry endpoint, or hosted MCP daemon. It reads labels, roles,
 structure, option display text, and locator metadata. It deliberately does not
-serialize current input values, password values, hidden controls, option
-`value` identifiers, URL fragments, or URL query values into tool definitions.
-Page URLs remain source metadata, so callers should avoid sensitive query
-parameters in requested URLs and treat artifacts as potentially sensitive
-site-structure data.
+serialize current input values, textarea contents, password values, hidden
+controls, option `value` identifiers, URL fragments, or URL query values into
+tool definitions or names. Page URLs in TIR are origin+path only; query strings
+and fragments are stripped from source and frame coverage metadata. Treat
+artifacts as potentially sensitive site-structure data.
 
 Safe exploration is off by default. When enabled it may open `<details>`
 elements by setting local DOM state, yields so reveal handlers can run, and
@@ -197,6 +200,10 @@ comparison checks. See `docs/performance.md`.
 
 ## Troubleshooting
 
+- `no matching top-level HTTP(S) target`: `--target active` requires exactly one
+  top-level HTTP(S) page. A fresh Chrome window with only a new tab
+  (`chrome://`, `about:blank`) is ignored; open the page first or pass `id:` /
+  `url:`.
 - `Chromium executable not found`: install Chromium/Chrome or pass
   `--browser-executable` with the full path.
 - `dom_not_quiet`: increase `--dom-quiet-timeout`; the partial observation is

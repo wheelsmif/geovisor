@@ -59,14 +59,21 @@ type roundTripElement struct {
 	Text          string `json:"text"`
 }
 
+type roundTripSubmit struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+}
+
 type roundTripToolOutcome struct {
-	Name       string             `json:"name"`
-	Input      map[string]any     `json:"input"`
-	Error      string             `json:"error"`
-	Changed    []int              `json:"changed"`
-	Clicked    []int              `json:"clicked"`
-	Dispatched []int              `json:"dispatched"`
-	State      []roundTripElement `json:"state"`
+	Name        string             `json:"name"`
+	Input       map[string]any     `json:"input"`
+	Error       string             `json:"error"`
+	Changed     []int              `json:"changed"`
+	Clicked     []int              `json:"clicked"`
+	Submitted   []roundTripSubmit  `json:"submitted"`
+	Dispatched  []int              `json:"dispatched"`
+	InputEvents []string           `json:"inputEvents"`
+	State       []roundTripElement `json:"state"`
 }
 
 // resolved reports the document-order indexes the tool's actions addressed. The
@@ -248,7 +255,7 @@ func TestWebMCPRuntimeDoesNotRegisterStandaloneFormControls(t *testing.T) {
 	if toolSlug(form.Name) != "profile-form" {
 		t.Fatalf("expected the composite form tool, got %q", form.Name)
 	}
-	claimed := []string{"display-name", "nickname", "plan", "email-alerts", "password"}
+	claimed := []string{"display-name", "nickname", "plan", "email-alerts", "password", "bio"}
 	for _, slug := range claimed {
 		for _, tool := range report.Tools {
 			if toolSlug(tool.Name) == slug {
@@ -395,6 +402,123 @@ func TestWebMCPRuntimeResolvesAmbiguousScopesToDistinctElements(t *testing.T) {
 	if len(indexes) != 2 || indexes[0] == indexes[1] {
 		t.Fatalf("ambiguous scopes resolved to %v; want two distinct elements", indexes)
 	}
+}
+
+func TestWebMCPFormToolDoesNotSubmit(t *testing.T) {
+	_, report := runRoundTrip(t, "testdata/corpus/two-submit.html", nil)
+	form := report.bySlug(t, "login")
+	if form.Error != "" {
+		t.Fatalf("form tool failed: %s", form.Error)
+	}
+	if len(form.Submitted) != 0 {
+		t.Fatalf("form tool clicked submit controls: %+v", form.Submitted)
+	}
+	if len(form.Changed) == 0 && len(form.Dispatched) == 0 {
+		t.Fatal("form tool did not fill any fields")
+	}
+
+	save := report.bySlug(t, "save")
+	continueSave := report.bySlug(t, "save-and-continue")
+	if save.Error != "" || continueSave.Error != "" {
+		t.Fatalf("submit tools failed: %s %s", save.Error, continueSave.Error)
+	}
+	if len(save.Submitted) != 1 || save.Submitted[0].Name != "Save" {
+		t.Fatalf("Save tool submitted %+v, want exactly Save", save.Submitted)
+	}
+	if len(continueSave.Submitted) != 1 || continueSave.Submitted[0].Name != "Save and continue" {
+		t.Fatalf("Save and continue submitted %+v", continueSave.Submitted)
+	}
+}
+
+func TestWebMCPInputSubmitIsActionNotParameter(t *testing.T) {
+	_, report := runRoundTrip(t, "testdata/corpus/input-submit.html", nil)
+	form := report.bySlug(t, "checkout")
+	if form.Error != "" {
+		t.Fatalf("checkout form failed: %s", form.Error)
+	}
+	if len(form.Submitted) != 0 {
+		t.Fatalf("checkout form submitted %+v", form.Submitted)
+	}
+	for _, tool := range report.Tools {
+		if toolSlug(tool.Name) == "place-order" || toolSlug(tool.Name) == "email" {
+			if toolSlug(tool.Name) == "email" {
+				t.Fatal("email was registered standalone")
+			}
+		}
+	}
+	place := report.bySlug(t, "place-order")
+	if len(place.Submitted) != 1 {
+		t.Fatalf("Place order submitted %+v, want one submit", place.Submitted)
+	}
+}
+
+func TestWebMCPSiblingShadowHostsResolveDistinctly(t *testing.T) {
+	document, report := runRoundTrip(t, "testdata/corpus/sibling-shadow.html", stripCSSFallbacks)
+	if report.ModuleError != "" {
+		t.Fatalf("module error: %s", report.ModuleError)
+	}
+	alpha := report.bySlug(t, "alpha")
+	beta := report.bySlug(t, "beta")
+	if alpha.Error != "" || beta.Error != "" {
+		t.Fatalf("shadow tools failed: %s %s", alpha.Error, beta.Error)
+	}
+	alphaResolved := alpha.resolved()
+	betaResolved := beta.resolved()
+	if len(alphaResolved) != 1 || len(betaResolved) != 1 || alphaResolved[0] == betaResolved[0] {
+		t.Fatalf("Alpha/Beta resolved to %v and %v", alphaResolved, betaResolved)
+	}
+	for _, tool := range document.Tools {
+		for _, locator := range tool.Locators {
+			if len(locator.ShadowPath) == 0 {
+				continue
+			}
+			last := locator.ShadowPath[len(locator.ShadowPath)-1]
+			if last.CSSFallback != "" && last.CSSFallback == "div" {
+				t.Fatalf("tool %q kept a non-unique shadow host CSS %q", tool.ID, last.CSSFallback)
+			}
+		}
+	}
+}
+
+func TestExtractCompileIDsStableWhenEarlierDuplicateNameInserted(t *testing.T) {
+	baselineHTML := `<!doctype html><html lang="en"><body>
+		<section role="region" aria-label="Filters"><input aria-label="Query"><input aria-label="Query"></section>
+	</body></html>`
+	shiftedHTML := `<!doctype html><html lang="en"><body>
+		<section role="region" aria-label="Earlier"><input aria-label="Query"></section>
+		<section role="region" aria-label="Filters"><input aria-label="Query"><input aria-label="Query"></section>
+	</body></html>`
+	baseline := compileExtracted(t, writeRoundTripFixture(t, baselineHTML))
+	shifted := compileExtracted(t, writeRoundTripFixture(t, shiftedHTML))
+
+	baselineIDs := toolIDsInScope(t, baseline, "Filters")
+	shiftedIDs := toolIDsInScope(t, shifted, "Filters")
+	if len(baselineIDs) != 2 || len(shiftedIDs) != 2 {
+		t.Fatalf("filter tools = %v vs %v", baselineIDs, shiftedIDs)
+	}
+	if baselineIDs[0] != shiftedIDs[0] || baselineIDs[1] != shiftedIDs[1] {
+		t.Fatalf("earlier duplicate-name control changed IDs from %v to %v", baselineIDs, shiftedIDs)
+	}
+}
+
+func toolIDsInScope(t *testing.T, document *tir.Document, scope string) []string {
+	t.Helper()
+	var ids []string
+	for _, tool := range document.Tools {
+		for _, locator := range tool.Locators {
+			if locator.Semantic == nil {
+				continue
+			}
+			for _, node := range locator.Semantic.Scope {
+				if node.Name == scope {
+					ids = append(ids, tool.ID)
+					break
+				}
+			}
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func TestExtractCompileIDsStableWhenUnrelatedElementInserted(t *testing.T) {

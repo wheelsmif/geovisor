@@ -171,9 +171,9 @@ func TestMCPConservativeAnnotations(t *testing.T) {
 		t.Fatalf("complex annotations = %#v", got)
 	}
 	if got := manifest.Tools[1].Annotations; got != (mcpAnnotations{
-		ReadOnlyHint: true, DestructiveHint: false, IdempotentHint: true, OpenWorldHint: false,
+		ReadOnlyHint: false, DestructiveHint: true, IdempotentHint: false, OpenWorldHint: false,
 	}) {
-		t.Fatalf("read-only annotations = %#v", got)
+		t.Fatalf("click annotations = %#v", got)
 	}
 }
 
@@ -186,7 +186,7 @@ func TestAnnotationDerivationForEverySideEffect(t *testing.T) {
 		openWorld     bool
 		consequential bool
 	}{
-		{sideEffect: tir.SideEffectNone, readOnly: true},
+		{sideEffect: tir.SideEffectNone, readOnly: false},
 		{sideEffect: tir.SideEffectLocalState},
 		{sideEffect: tir.SideEffectNetwork, openWorld: true, consequential: true},
 		{sideEffect: tir.SideEffectNavigation, openWorld: true, consequential: true},
@@ -386,6 +386,169 @@ func TestTypedErrors(t *testing.T) {
 				t.Fatalf("error = %T %v, want %s", err, err, test.code)
 			}
 		})
+	}
+}
+
+func TestWebMCPSkipsCrossOriginOnlyTools(t *testing.T) {
+	t.Parallel()
+
+	document := tir.NewDocument(tir.SourceMetadata{
+		Kind:              tir.SourceLaunchURL,
+		ExecutionBoundary: tir.ExecutionAgentOwned,
+		RequestedURL:      "https://app.example/path",
+		FinalURL:          "https://app.example/path",
+	})
+	document.FrameCoverage.Status = tir.CoverageComplete
+	document.FrameCoverage.Frames = []tir.CoveredFrame{
+		{Path: []tir.FrameReference{}, URL: "https://app.example/path", Origin: "https://app.example"},
+		{
+			Path:   []tir.FrameReference{{Index: 0, Name: "pay", Src: "https://pay.example/checkout"}},
+			URL:    "https://pay.example/checkout",
+			Origin: "https://pay.example",
+		},
+	}
+	document.Tools = []tir.Tool{
+		{
+			ID:   "local_button",
+			Name: "Local",
+			Locators: []tir.LocatorCandidate{{
+				ID:          "local-locator",
+				CSSFallback: "#local",
+				Confidence:  tir.Confidence{Score: 1},
+			}},
+			Actions: []tir.ActionBinding{{
+				Action:              tir.ActionClick,
+				LocatorCandidateIDs: []string{"local-locator"},
+				SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
+			}},
+			Confidence: tir.Confidence{Score: 1},
+		},
+		{
+			ID:   "pay_button",
+			Name: "Pay",
+			Locators: []tir.LocatorCandidate{{
+				ID: "pay-locator",
+				FramePath: []tir.PathNode{{
+					Semantic: &tir.SemanticNode{Role: "iframe", Nth: 0},
+				}},
+				CSSFallback: "#pay",
+				Confidence:  tir.Confidence{Score: 1},
+			}},
+			Actions: []tir.ActionBinding{{
+				Action:              tir.ActionClick,
+				LocatorCandidateIDs: []string{"pay-locator"},
+				SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
+			}},
+			Confidence: tir.Confidence{Score: 1},
+		},
+	}
+	document.Normalize()
+
+	mcpResult, err := (MCP{}).Emit(context.Background(), document, Options{})
+	if err != nil {
+		t.Fatalf("emit MCP: %v", err)
+	}
+	var manifest struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(mcpResult.Primary.Data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Tools) != 2 {
+		t.Fatalf("MCP tools = %d, want both local and cross-origin definitions", len(manifest.Tools))
+	}
+
+	webResult, err := (WebMCP{}).Emit(context.Background(), document, Options{})
+	if err != nil {
+		t.Fatalf("emit WebMCP: %v", err)
+	}
+	definitions := decodeWebMCPDefinitions(t, webResult.Primary.Data)
+	if len(definitions) != 1 || definitions[0]["name"] != "local_button" {
+		t.Fatalf("WebMCP definitions = %#v, want only local_button", definitions)
+	}
+}
+
+func TestWebMCPSkipsUncoveredFrameOnlyTools(t *testing.T) {
+	t.Parallel()
+
+	document := tir.NewDocument(tir.SourceMetadata{
+		Kind:              tir.SourceLaunchURL,
+		ExecutionBoundary: tir.ExecutionAgentOwned,
+		RequestedURL:      "https://app.example/path",
+		FinalURL:          "https://app.example/path",
+	})
+	document.FrameCoverage.Status = tir.CoveragePartial
+	document.FrameCoverage.Frames = []tir.CoveredFrame{
+		{Path: []tir.FrameReference{}, URL: "https://app.example/path", Origin: "https://app.example"},
+	}
+	document.FrameCoverage.Uncovered = []tir.UncoveredFrame{
+		{
+			Path:   []tir.FrameReference{{Index: 0, Name: "closed"}},
+			Reason: "frame is not visible to page JavaScript (closed shadow or equivalent)",
+		},
+	}
+	document.Tools = []tir.Tool{
+		{
+			ID:   "local_button",
+			Name: "Local",
+			Locators: []tir.LocatorCandidate{{
+				ID:          "local-locator",
+				CSSFallback: "#local",
+				Confidence:  tir.Confidence{Score: 1},
+			}},
+			Actions: []tir.ActionBinding{{
+				Action:              tir.ActionClick,
+				LocatorCandidateIDs: []string{"local-locator"},
+				SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
+			}},
+			Confidence: tir.Confidence{Score: 1},
+		},
+		{
+			ID:   "closed_button",
+			Name: "Closed",
+			Locators: []tir.LocatorCandidate{{
+				ID: "closed-locator",
+				FramePath: []tir.PathNode{{
+					Semantic: &tir.SemanticNode{Role: "iframe", Nth: 0},
+				}},
+				CSSFallback: "#closed",
+				Confidence:  tir.Confidence{Score: 1},
+			}},
+			Actions: []tir.ActionBinding{{
+				Action:              tir.ActionClick,
+				LocatorCandidateIDs: []string{"closed-locator"},
+				SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
+			}},
+			Confidence: tir.Confidence{Score: 1},
+		},
+	}
+	document.Normalize()
+
+	mcpResult, err := (MCP{}).Emit(context.Background(), document, Options{})
+	if err != nil {
+		t.Fatalf("emit MCP: %v", err)
+	}
+	var manifest struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(mcpResult.Primary.Data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Tools) != 2 {
+		t.Fatalf("MCP tools = %d, want both local and uncovered-frame definitions", len(manifest.Tools))
+	}
+
+	webResult, err := (WebMCP{}).Emit(context.Background(), document, Options{})
+	if err != nil {
+		t.Fatalf("emit WebMCP: %v", err)
+	}
+	definitions := decodeWebMCPDefinitions(t, webResult.Primary.Data)
+	if len(definitions) != 1 || definitions[0]["name"] != "local_button" {
+		t.Fatalf("WebMCP definitions = %#v, want only local_button", definitions)
 	}
 }
 

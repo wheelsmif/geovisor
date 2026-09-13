@@ -33,8 +33,9 @@ safe exploration is enabled it restores any `<details>` `open` state it
 changed. Stealth is explicit opt-in and is not an access-control bypass.
 Inaccessible frames remain visible as partial coverage. Closed shadow roots
 and suppressed element-level extraction failures are reported as warnings.
-Current field values, password values, hidden controls, and option value
-identifiers must never enter TIR or emitter output.
+Current field values, including textarea contents used for accessible names or
+descriptions, password values, hidden controls, and option value identifiers
+must never enter TIR or emitter output.
 
 Tool names, descriptions, and other labels originate in page text
 (`aria-label`, `title`, `textContent`). Treat generated artifacts as

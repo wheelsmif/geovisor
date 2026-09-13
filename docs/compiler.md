@@ -12,14 +12,14 @@ action kinds, side-effect classes, and evidence kinds. Navigation, submission,
 and unknown cannot be marked safe to explore.
 
 Interaction identity consists of interaction kind, frame path, semantic scope,
-role, and normalized accessible name. When a name is absent — including when
-the extractor had only a positional fallback — identity includes the semantic
-and path halves of each locator, not the CSS fallback. Scope identity includes
-each node's match ordinal, so two scopes that share a role and a name but
-select different elements are distinct and their tools are not merged. This
-deduplicates repeated observations without merging equivalent-looking controls
-in different frames or semantic scopes, and without changing an unaffected
-tool's ID when an unrelated earlier element is inserted.
+role, the pre-disambiguation accessible name, and the semantic and path halves
+of each locator, not the CSS fallback. Display-name ordinals such as
+`Query (2)` are not part of identity. Scope identity includes each node's match
+ordinal, so two scopes that share a role and a name but select different
+elements are distinct and their tools are not merged. This deduplicates
+repeated observations without merging equivalent-looking controls in different
+frames or semantic scopes, and without changing an unaffected tool's ID when an
+unrelated earlier element or same-label control in another scope is inserted.
 
 IDs use an ASCII semantic slug (capped so the complete ID stays within 64
 characters) plus the first 48 bits of SHA-256 over length-delimited canonical
@@ -31,13 +31,15 @@ deterministic numeric suffixes.
 A control owned by a form is a parameter of that form's tool and is not also
 observed as a standalone tool. Emitting both gives an agent two ways to fill one
 field with no basis for choosing between them, and roughly doubles the tool count
-on form-heavy pages. Submit buttons are the deliberate exception: they are
-actions rather than parameters, and a form tool requires every required
-parameter, so dropping the standalone button would remove the ability to submit
-without also filling the form.
+on form-heavy pages. A form tool is fill-only: its actions are the fill, select,
+and check bindings for its parameters. It never includes a submission click.
+Submit, reset, button, and image inputs are actions only, never form parameters
+or fill tools. Each submit control remains a standalone action so an agent can
+submit without filling, or fill without submitting.
 
-Ownership follows HTML, not containment, so a control associated with a form by
-the `form` attribute is claimed exactly like a nested one.
+Ownership follows HTML form-associated elements, not a raw `form` attribute on
+arbitrary elements, so a control associated with a form by the `form` attribute
+is claimed exactly like a nested one.
 
 Evidence is deduplicated by provenance kind and reference, retaining the
 highest reported score. Confidence is the noisy-or of the sorted unique scores,
@@ -55,4 +57,8 @@ and uncovered frame produces a structured warning.
 
 `tir.Marshal` and `tir.Write` deep-clone, normalize, canonically order, and
 validate before emitting compact JSON. Both omit a trailing newline and never
-mutate caller-owned documents.
+mutate caller-owned documents. Page URLs in TIR (`source.requestedUrl`,
+`source.finalUrl`, frame coverage URLs, and `FrameReference.src`) are
+origin+path only: query strings and fragments are stripped at the compiler
+boundary. Negative locator `nth` values are rejected at this boundary and by
+`tir.Validate`.

@@ -131,6 +131,9 @@ func validateEndpoint(raw string) (*url.URL, error) {
 	if parsed.Host == "" {
 		return nil, errors.New("endpoint host is required")
 	}
+	if parsed.User != nil {
+		return nil, errors.New("endpoint credentials are not allowed")
+	}
 	if parsed.Fragment != "" {
 		return nil, errors.New("endpoint fragment is not allowed")
 	}
@@ -227,5 +230,16 @@ func sanitizeURL(raw string) string {
 		parsed.RawQuery = "redacted"
 	}
 	parsed.Fragment = ""
+	parsed.Path = redactDevToolsPath(parsed.Path)
+	parsed.RawPath = ""
 	return parsed.String()
+}
+
+func redactDevToolsPath(path string) string {
+	for _, prefix := range []string{"/devtools/browser/", "/devtools/page/"} {
+		if strings.HasPrefix(path, prefix) && len(path) > len(prefix) {
+			return prefix + "[redacted]"
+		}
+	}
+	return path
 }

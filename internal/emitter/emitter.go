@@ -133,7 +133,7 @@ type annotationHints struct {
 func annotationHintsFrom(actions []tir.ActionBinding) annotationHints {
 	hints := annotationHints{readOnly: true}
 	for _, action := range actions {
-		if action.SideEffect.Class != tir.SideEffectNone {
+		if mutatingAction(action.Action) || action.SideEffect.Class != tir.SideEffectNone {
 			hints.readOnly = false
 		}
 		switch action.SideEffect.Class {
@@ -143,6 +143,15 @@ func annotationHintsFrom(actions []tir.ActionBinding) annotationHints {
 		}
 	}
 	return hints
+}
+
+func mutatingAction(kind tir.ActionKind) bool {
+	switch kind {
+	case tir.ActionClick, tir.ActionFill, tir.ActionCheck, tir.ActionSelect:
+		return true
+	default:
+		return false
+	}
 }
 
 func canceled(ctx context.Context, format Format) error {

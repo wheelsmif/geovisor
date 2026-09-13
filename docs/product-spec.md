@@ -56,14 +56,17 @@ WebMCP, MCP, or OpenAI tool formats.
 - Confidence, provenance, and warnings remain structured data.
 - Core artifacts contain no generated timestamps, random IDs, or run-specific
   metadata by default.
+- Page URLs in TIR are origin+path only. Query strings and fragments are
+  stripped from source URLs, frame coverage URLs, and frame `src` values.
+- A form tool is fill-only. Submit controls are standalone actions.
 
 ## Determinism
 
 Producers preserve stable source order, derive any IDs from stable content, call
 `Normalize` before serialization, and avoid maps in canonical DTOs. All JSON
 collections serialize as arrays, including empty collections. Tool IDs are
-stable across unrelated earlier DOM edits: positional fallback names and CSS
-selectors are not part of identity.
+stable across unrelated earlier DOM edits: positional fallback names, display
+name ordinals, and CSS selectors are not part of identity.
 
 ## Artifact writes
 

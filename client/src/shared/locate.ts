@@ -70,14 +70,16 @@ function candidates(root: Root): Element[] {
  * shadow roots, because a frame hosted in a shadow root is still one of its
  * document's frames and is counted as such upstream.
  *
- * This mirrors `mergeFrameOwnerOrder` in internal/browser/frames.go: pre-order
- * descent, light children before shadow content, and no descent past a frame,
- * whose contents belong to a different document.
+ * This mirrors `collectFrameOwnerOrder` in internal/browser/frames.go: pre-order
+ * descent, light children before open-shadow content, localName iframe|frame
+ * (not computed role), and no descent past a frame, whose contents belong to a
+ * different document. Closed shadows are invisible to `element.shadowRoot`.
  */
 export function frameCandidates(root: Root): Element[] {
   const frames: Element[] = [];
   const visit = (element: Element): void => {
-    if (matchRole(element) === FRAME_ROLE) {
+    const tag = element.localName;
+    if (tag === "iframe" || tag === "frame") {
       frames.push(element);
       return;
     }

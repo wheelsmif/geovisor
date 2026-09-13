@@ -19,6 +19,12 @@ than disappearing from the result. Readiness probes and extraction run in an
 isolated world so the page cannot observe that JavaScript. Closed shadow roots
 discovered by CDP pierce are reported as batch warnings.
 
+Access-interstitial detection is a substring hint over a bounded slice of the
+root document title and body text (`verify you are human`, `checking your
+browser`, `attention required`, `access denied`, `captcha`, `unusual traffic`).
+It is not a classifier. A match is a non-fatal diagnostic; extraction still
+runs. The phrase list is not expanded without a dedicated review.
+
 ## Launch process policy
 
 Every GEO-Visor-owned launch explicitly calls `Leakless(false)`. This avoids

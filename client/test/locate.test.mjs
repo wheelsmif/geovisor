@@ -65,3 +65,16 @@ test("numbers a shadow-hosted frame before a later light sibling", async () => {
   assert.equal(frames[0].getRootNode(), dom.window.document.querySelector(".host").shadowRoot);
   assert.equal(frames[1].getRootNode(), dom.window.document);
 });
+
+test("counts role=presentation iframes by localName", async () => {
+  const html = await readFile(
+    resolve(repositoryRoot, "testdata", "corpus", "presentation-frames.html"),
+    "utf8",
+  );
+  const dom = new JSDOM(html, { url: "https://example.test/presentation-frames" });
+  const { frameCandidates } = await loadLocate();
+  const frames = frameCandidates(dom.window.document);
+  assert.equal(frames.length, 2);
+  assert.equal(frames[0].getAttribute("role"), "presentation");
+  assert.equal(frames[1].hasAttribute("role"), false);
+});

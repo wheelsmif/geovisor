@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>GEO-Visor nested shadow and cross-origin coverage</title>
+  </head>
+  <body>
+    <!--
+      Kitchen-sink coverage for TestLaunchObservesNestedShadowAndCrossOriginFrames.
+      frames.html remains the GV-003 two-wrapper locator fixture; this page is
+      the required Chromium walk: root, open shadow, nested same-origin frames,
+      and a real cross-origin OOPIF.
+    -->
+    <button aria-label="Root action">Root</button>
+    <div id="shadow-host">
+      <template shadowrootmode="open">
+        <button aria-label="Shadow action">Shadow</button>
+      </template>
+    </div>
+    <iframe src="/nested-frame.html"></iframe>
+    <iframe name="cross-origin" src="{{CROSS_ORIGIN}}"></iframe>
+  </body>
+</html>

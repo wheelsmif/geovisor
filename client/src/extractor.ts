@@ -39,14 +39,14 @@ const MAX_TIMEOUT_MS = 10_000;
 /** Per-call @medv/finder budget. Exhaustion falls back to simpleSelector (GV-033). */
 const FINDER_TIMEOUT_MS = 50;
 
-const CUSTOM_CONTROL_ROLES = new Set([
-  "checkbox",
+/** Custom widgets the runtime can operate as a click, not a native apply. */
+const CLICKABLE_CUSTOM_ROLES = new Set(["checkbox", "radio", "switch"]);
+/** Custom widgets with no apply path; omit rather than register a throwing tool. */
+const OMITTED_CUSTOM_ROLES = new Set([
   "combobox",
-  "radio",
   "searchbox",
   "slider",
   "spinbutton",
-  "switch",
   "textbox",
 ]);
 const ACTION_ROLES = new Set([
@@ -76,6 +76,7 @@ interface ElementRecord {
   sourceOrder: number;
   /** Resolved by `traverse`, which is the only place ancestors are known. */
   hidden: boolean;
+  disabled: boolean;
 }
 
 interface LabelResult {
@@ -86,7 +87,6 @@ interface LabelResult {
 
 interface ExplorationResult {
   details: Set<Element>;
-  focused: Set<Element>;
 }
 
 interface NormalizedOptions {
@@ -125,10 +125,26 @@ function normalizeOptions(options: ExtractionOptions | undefined): NormalizedOpt
  * accessibility tree, with `aria-hidden="false"` on a descendant not undoing it.
  */
 function hidesSubtree(element: Element): boolean {
-  if (element.hasAttribute("hidden") || element.getAttribute("aria-hidden") === "true") {
+  if (
+    element.hasAttribute("inert") ||
+    element.hasAttribute("hidden") ||
+    element.getAttribute("aria-hidden") === "true"
+  ) {
     return true;
   }
   return read(false, () => getComputedStyle(element).display === "none");
+}
+
+function disablesSubtree(element: Element): boolean {
+  return element.localName === "fieldset" && element.hasAttribute("disabled");
+}
+
+function isDisabledHere(element: Element): boolean {
+  return element.hasAttribute("disabled") || disablesSubtree(element);
+}
+
+function isReadonlyControl(element: Element): boolean {
+  return element.hasAttribute("readonly") || element.getAttribute("aria-readonly") === "true";
 }
 
 /**
@@ -183,10 +199,23 @@ function cssEscape(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/gu, (character) => `\\${character}`);
 }
 
+function selectorParent(element: Element): ParentNode | null {
+  if (element.parentElement) return element.parentElement;
+  const parent = element.parentNode;
+  if (
+    parent &&
+    (parent.nodeType === 9 || parent.nodeType === 11) &&
+    "children" in parent
+  ) {
+    return parent;
+  }
+  return null;
+}
+
 function simpleSelector(element: Element): string {
   const id = cleanText(element.id);
   if (id) return `#${cssEscape(id)}`;
-  const parent = element.parentElement;
+  const parent = selectorParent(element);
   const tag = element.localName;
   if (!parent) return tag;
   const siblings = Array.from(parent.children).filter((sibling) => sibling.localName === tag);
@@ -196,12 +225,15 @@ function simpleSelector(element: Element): string {
 
 function cssFallback(element: Element): string {
   const fallback = simpleSelector(element);
+  if (fallback.startsWith("#")) return fallback;
   const root = element.getRootNode();
-  if (root.nodeType !== 9) {
+  if (root.nodeType !== 9 && root.nodeType !== 11) {
     return fallback;
   }
-  return readExpected(fallback, () =>
+  const scoped = root as Document | ShadowRoot;
+  const found = readExpected(fallback, () =>
     finder(element, {
+      root: root as unknown as Element,
       attr: (name) => name === "role" || name === "type",
       className: () => false,
       idName: () => false,
@@ -211,6 +243,19 @@ function cssFallback(element: Element): string {
       optimizedMinLength: 2,
       maxNumberOfPathChecks: 5_000,
     }),
+  );
+  if (found !== fallback && selectorUniquelyMatches(scoped, found, element)) {
+    return found;
+  }
+  return fallback;
+}
+
+function selectorUniquelyMatches(root: Document | ShadowRoot, selector: string, element: Element): boolean {
+  return (
+    read(false, () => {
+      const matches = root.querySelectorAll(selector);
+      return matches.length === 1 && matches[0] === element;
+    }) === true
   );
 }
 
@@ -244,13 +289,16 @@ function traverse(root: Document | ShadowRoot): ElementRecord[] {
     parent: Document | ShadowRoot | Element,
     shadowPath: PathNode[],
     inheritedHidden: boolean,
+    inheritedDisabled: boolean,
   ): void => {
     for (const element of Array.from(parent.children)) {
       const hidden = inheritedHidden || read(true, () => isHiddenLocally(element));
-      records.push({ element, shadowPath, sourceOrder: sourceOrder++, hidden });
+      const disabled = inheritedDisabled || read(false, () => isDisabledHere(element));
+      records.push({ element, shadowPath, sourceOrder: sourceOrder++, hidden, disabled });
       // Only subtree-hiding conditions propagate. `visibility: hidden` does not,
       // because a descendant may set `visibility: visible`.
       const subtreeHidden = inheritedHidden || read(true, () => hidesSubtree(element));
+      const subtreeDisabled = inheritedDisabled || read(false, () => disablesSubtree(element));
 
       const shadowRoot = read<ShadowRoot | null>(null, () => element.shadowRoot);
       if (shadowRoot?.mode === "open") {
@@ -258,13 +306,13 @@ function traverse(root: Document | ShadowRoot): ElementRecord[] {
           { css: read(element.localName, () => simpleSelector(element)) },
           () => pathNode(element, sourceOrder),
         );
-        visit(shadowRoot, [...shadowPath, hostPath], subtreeHidden);
+        visit(shadowRoot, [...shadowPath, hostPath], subtreeHidden, subtreeDisabled);
       }
-      visit(element, shadowPath, subtreeHidden);
+      visit(element, shadowPath, subtreeHidden, subtreeDisabled);
     }
   };
 
-  visit(root, [], false);
+  visit(root, [], false, false);
   return records;
 }
 
@@ -467,24 +515,59 @@ function controlAction(element: Element, parameter: string, locatorIndex = 0): A
   };
 }
 
-function isNativeControl(element: Element): boolean {
+function isButtonLikeInput(element: Element): boolean {
   return (
-    (element.matches("input, select, textarea") &&
-      !(element instanceof HTMLInputElement && inputType(element) === "hidden")) ||
-    isContentEditable(element)
+    element.localName === "input" &&
+    ["button", "image", "reset", "submit"].includes(inputType(element))
   );
 }
 
+function isNativeControl(element: Element): boolean {
+  if (isContentEditable(element)) return true;
+  if (!element.matches("input, select, textarea")) return false;
+  const tag = element.localName;
+  if (tag === "select" || tag === "textarea") return true;
+  const type = inputType(element);
+  return type !== "hidden" && type !== "file" && !isButtonLikeInput(element);
+}
+
+function isFillableControl(element: Element): boolean {
+  return isNativeControl(element) && !isReadonlyControl(element);
+}
+
+function isCustomClickable(element: Element): boolean {
+  if (isNativeControl(element) || isButtonLikeInput(element)) return false;
+  return CLICKABLE_CUSTOM_ROLES.has(explicitRole(element));
+}
+
+function isOmittedCustomWidget(element: Element): boolean {
+  if (isNativeControl(element) || isButtonLikeInput(element)) return false;
+  return OMITTED_CUSTOM_ROLES.has(explicitRole(element));
+}
+
 function isControl(element: Element): boolean {
-  return isNativeControl(element) || CUSTOM_CONTROL_ROLES.has(explicitRole(element));
+  return isFillableControl(element);
 }
 
 function isAction(element: Element): boolean {
   if (element.matches("button, a[href], summary")) return true;
-  if (element instanceof HTMLInputElement) {
-    return ["button", "image", "reset", "submit"].includes(inputType(element));
-  }
+  if (isButtonLikeInput(element)) return true;
+  if (isCustomClickable(element)) return true;
   return ACTION_ROLES.has(explicitRole(element));
+}
+
+function isFormAssociated(element: Element): boolean {
+  const tag = element.localName;
+  return (
+    tag === "button" ||
+    tag === "fieldset" ||
+    tag === "input" ||
+    tag === "object" ||
+    tag === "output" ||
+    tag === "select" ||
+    tag === "textarea" ||
+    tag === "img"
+  );
 }
 
 function actionEffect(element: Element): SideEffect {
@@ -578,19 +661,10 @@ function actionInteraction(record: ElementRecord): Interaction {
 }
 
 function associatedForm(element: Element): HTMLFormElement | null {
-  if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLSelectElement ||
-    element instanceof HTMLTextAreaElement ||
-    element instanceof HTMLButtonElement
-  ) {
-    return element.form;
-  }
-  const formId = element.getAttribute("form");
-  if (formId) {
-    const root = element.getRootNode() as Document | ShadowRoot;
-    const found = typeof root.getElementById === "function" ? root.getElementById(formId) : null;
-    if (found instanceof HTMLFormElement) return found;
+  if (isFormAssociated(element) && "form" in element) {
+    const form = (element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement)
+      .form;
+    return form ?? null;
   }
   return element.closest("form");
 }
@@ -600,6 +674,7 @@ function formMembers(form: HTMLFormElement, records: ElementRecord[]): ElementRe
   return records.filter(
     (record) =>
       !record.hidden &&
+      !record.disabled &&
       (isControl(record.element) || isAction(record.element)) &&
       associatedForm(record.element) === form,
   );
@@ -625,19 +700,6 @@ function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): I
     parameters.push(parameterFor(record.element, controlLabel, record.sourceOrder, name));
     locators.push(locatorFor(record, controlRole, locatorMatchName(controlLabel)));
     actions.push(controlAction(record.element, name, locators.length - 1));
-  }
-
-  for (const record of members.filter((member) => isAction(member.element))) {
-    const effect = actionEffect(record.element);
-    if (effect.class !== "submission") continue;
-    const actionRole = semanticRole(record.element) || GENERIC_ROLE;
-    const actionLabel = labelFor(record.element, actionRole, record.sourceOrder);
-    locators.push(locatorFor(record, actionRole, locatorMatchName(actionLabel)));
-    actions.push({
-      kind: "click",
-      locatorIndexes: [locators.length - 1],
-      sideEffect: effect,
-    });
   }
 
   const formLocator = locatorFor(formRecord, role, locatorMatchName(label));
@@ -696,10 +758,17 @@ async function exploreSafely(
   records: ElementRecord[],
   options: NormalizedOptions,
 ): Promise<{ exploration: ExplorationResult; restore: () => void }> {
-  const exploration: ExplorationResult = { details: new Set(), focused: new Set() };
-  const opened: OpenedDetails[] = [];
+  const exploration: ExplorationResult = { details: new Set() };
+  const snapshots: OpenedDetails[] = [];
+  for (const record of records) {
+    if (record.element.localName !== "details") continue;
+    snapshots.push({
+      element: record.element as HTMLDetailsElement,
+      wasOpen: (record.element as HTMLDetailsElement).open,
+    });
+  }
   const restore = (): void => {
-    for (const item of opened) {
+    for (const item of snapshots) {
       item.element.open = item.wasOpen;
     }
   };
@@ -722,7 +791,6 @@ async function exploreSafely(
         continue;
       }
       operations++;
-      opened.push({ element, wasOpen: false });
       exploration.details.add(element);
       element.open = true;
       await yieldToEventLoop();
@@ -749,13 +817,6 @@ function explorationEvidence(
         score: 0.7,
       });
     }
-  }
-  if (exploration.focused.has(element)) {
-    interaction.evidence.push({
-      kind: "heuristic",
-      reference: "exploration:focused-without-input",
-      score: 0.55,
-    });
   }
 }
 
@@ -790,12 +851,10 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
   try {
     if (exploration.details.size > 0) records = traverse(document);
 
-    // Forms claim their controls first (GV-007). A control owned by a form is a
-    // parameter of that form's tool and is not also emitted as a standalone tool:
-    // two tools that fill the same field give an agent no basis for choosing
-    // between them. Submit buttons are deliberately not claimed -- they are
-    // actions rather than parameters, and the form tool requires every required
-    // parameter, so dropping them would remove the ability to just click submit.
+    // Forms claim their fillable controls first (GV-007). A control owned by a
+    // form is a parameter of that form's tool and is not also emitted standalone.
+    // The form tool is fill-only: submission stays a standalone action (P1).
+    // Submit/reset/button/image inputs are actions, never parameters (P2).
     const formMemberIndex = new Map<HTMLFormElement, ElementRecord[]>();
     const claimed = new Set<Element>();
     for (const record of records) {
@@ -809,8 +868,9 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
 
     const interactions: Interaction[] = [];
     let elementFailures = 0;
+    let omittedCustom = 0;
     for (const record of records) {
-      if (record.hidden) continue;
+      if (record.hidden || record.disabled) continue;
       const element = record.element;
       try {
         // The branches are exclusive: one record must not yield two interactions.
@@ -818,6 +878,8 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
           interactions.push(formInteraction(record, formMemberIndex.get(element) ?? []));
         } else if (claimed.has(element)) {
           // Already a parameter of its form's tool.
+        } else if (isOmittedCustomWidget(element)) {
+          omittedCustom++;
         } else if (isControl(element)) {
           const interaction = controlInteraction(record);
           explorationEvidence(interaction, element, exploration);
@@ -841,6 +903,12 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
       warnings.push({
         code: "element_extraction_failed",
         message: `${elementFailures} element(s) could not be extracted`,
+      });
+    }
+    if (omittedCustom > 0) {
+      warnings.push({
+        code: "custom_control_omitted",
+        message: `${omittedCustom} custom widget(s) have no apply path and were omitted`,
       });
     }
 

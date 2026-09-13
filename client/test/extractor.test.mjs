@@ -61,10 +61,14 @@ test("extracts four-tier labels and ordered form controls", async () => {
   assert.deepEqual(Array.from(form.parameters[2].enum), ["Basic", "Pro"]);
   assert.match(form.parameters[5].description, /never observed/u);
   assert.equal(
-    form.actions.find((action) => action.sideEffect.class === "submission")?.sideEffect
-      .safeForExploration,
+    form.actions.some((action) => action.sideEffect.class === "submission"),
     false,
   );
+  const save = interactions(batch, "action").find((item) => item.name === "Save");
+  assert.ok(save);
+  assert.equal(save.actions[0].kind, "click");
+  assert.equal(save.actions[0].sideEffect.class, "submission");
+  assert.equal(save.actions[0].sideEffect.safeForExploration, false);
 });
 
 test("traverses nested open shadow roots with structured host paths", async () => {
@@ -83,7 +87,7 @@ test("traverses nested open shadow roots with structured host paths", async () =
   );
   assert.ok(action);
   assert.equal(action.locators[0].shadowPath.length, 2);
-  assert.equal(action.locators[0].shadowPath[0].css, "div");
+  assert.equal(action.locators[0].shadowPath[0].css, "#outer");
   assert.equal(action.locators[0].shadowPath[1].css, "#inner");
   assert.equal(action.locators[0].framePath.length, 0);
 });
@@ -309,6 +313,12 @@ test("records match ordinals on ambiguous semantic scopes", async () => {
 test("never serializes current or hidden sensitive values", async () => {
   const dom = page(`
     <input aria-label="Public" value="CURRENT-VALUE-SECRET">
+    <label>Name <input value="INPUT-SECRET"></label>
+    <label>Bio <textarea>TEXTAREA-SECRET</textarea></label>
+    <textarea id="src">LABELLEDBY-SECRET</textarea>
+    <input aria-labelledby="src" aria-label="Cited">
+    <textarea id="hint">DESCRIBED-SECRET</textarea>
+    <input aria-label="Noted" aria-describedby="hint">
     <input type="password" aria-label="Password" value="PASSWORD-SECRET">
     <input type="hidden" name="csrf" value="TOKEN-SECRET">
     <select aria-label="Tier"><option value="HIDDEN-OPTION-SECRET">Visible option</option></select>
@@ -317,7 +327,7 @@ test("never serializes current or hidden sensitive values", async () => {
   const serialized = JSON.stringify(await dom.window.__GEOVISOR_EXTRACT__());
   assert.doesNotMatch(
     serialized,
-    /CURRENT-VALUE-SECRET|PASSWORD-SECRET|TOKEN-SECRET|HIDDEN-OPTION-SECRET/u,
+    /CURRENT-VALUE-SECRET|INPUT-SECRET|TEXTAREA-SECRET|LABELLEDBY-SECRET|DESCRIBED-SECRET|PASSWORD-SECRET|TOKEN-SECRET|HIDDEN-OPTION-SECRET/u,
   );
   assert.match(serialized, /Sensitive password field/u);
   assert.match(serialized, /Visible option/u);
@@ -326,15 +336,25 @@ test("never serializes current or hidden sensitive values", async () => {
 test("extracts semantic custom controls and conservative triggers", async () => {
   const dom = page(`
     <div role="switch" aria-label="Dark mode"></div>
+    <div role="textbox" aria-label="Custom box"></div>
+    <div role="combobox" aria-label="Custom combo"></div>
+    <div role="slider" aria-label="Custom slider"></div>
     <div role="tab" aria-label="Settings" aria-controls="panel"></div>
     <button command="show-modal" commandfor="dialog">Open dialog</button>
     <dialog id="dialog"></dialog>
   `);
 
   const batch = await dom.window.__GEOVISOR_EXTRACT__();
-  const control = interactions(batch, "control").find((item) => item.name === "Dark mode");
-  assert.equal(control.parameters[0].type, "boolean");
-  assert.equal(control.actions[0].kind, "check");
+  const dark = interactions(batch, "action").find((item) => item.name === "Dark mode");
+  assert.ok(dark);
+  assert.equal(dark.actions[0].kind, "click");
+  assert.equal(
+    interactions(batch, "control").some((item) =>
+      ["Custom box", "Custom combo", "Custom slider"].includes(item.name),
+    ),
+    false,
+  );
+  assert.ok(batch.warnings.some((warning) => warning.code === "custom_control_omitted"));
   for (const action of interactions(batch, "action")) {
     assert.equal(action.actions[0].sideEffect.safeForExploration, false);
   }
@@ -417,9 +437,9 @@ test("emits form-owned controls only as form parameters", async () => {
   );
 });
 
-// A control associated with a form by the `form` attribute rather than by
-// containment is owned just as much, and is claimed the same way.
-test("claims contenteditable controls associated with a form by attribute", async () => {
+// Ownership follows HTML form-associated elements. A raw `form` attribute on a
+// contenteditable div does not make it a form control.
+test("does not claim contenteditable divs from a raw form attribute", async () => {
   const dom = page(`
     <form id="notes" aria-label="Notes"></form>
     <div contenteditable aria-label="Memo" form="notes"></div>
@@ -428,11 +448,11 @@ test("claims contenteditable controls associated with a form by attribute", asyn
   const batch = await dom.window.__GEOVISOR_EXTRACT__();
   assert.deepEqual(
     Array.from(interactions(batch, "form")[0].parameters, (parameter) => parameter.name),
-    ["memo"],
+    [],
   );
   assert.deepEqual(
     Array.from(interactions(batch, "control"), (item) => item.name),
-    [],
+    ["Memo"],
   );
 });
 
@@ -557,6 +577,145 @@ test("records an explicit search role on a form", async () => {
   const dom = page(`<form role="search" aria-label="Find"><input aria-label="Query"></form>`);
   const batch = await dom.window.__GEOVISOR_EXTRACT__();
   assert.equal(interactions(batch, "form")[0].role, "search");
+});
+
+test("omits inert, disabled, and readonly controls", async () => {
+  const dom = page(`
+    <div inert><input aria-label="Inert field"></div>
+    <input aria-label="Disabled field" disabled>
+    <fieldset disabled><input aria-label="Fieldset disabled"></fieldset>
+    <input aria-label="Readonly field" readonly>
+    <input aria-label="Aria readonly" aria-readonly="true">
+    <input aria-label="Live field">
+  `);
+
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    ["Live field"],
+  );
+});
+
+test("omits file inputs instead of emitting a string fill", async () => {
+  const dom = page(`
+    <form aria-label="Resume"><input type="file" aria-label="Resume"></form>
+    <input type="file" aria-label="Standalone file">
+    <input aria-label="Visible">
+  `);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  assert.equal(interactions(batch, "form")[0].parameters.length, 0);
+  assert.deepEqual(
+    Array.from(interactions(batch, "control"), (item) => item.name),
+    ["Visible"],
+  );
+});
+
+test("treats button-like inputs as actions, never fill parameters", async () => {
+  const dom = page(`
+    <form aria-label="Checkout">
+      <label for="email">Email</label>
+      <input id="email" type="email" required>
+      <input type="submit" value="Place order">
+    </form>
+    <input type="reset" value="Reset standalone">
+  `);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  const form = interactions(batch, "form")[0];
+  assert.deepEqual(
+    Array.from(form.parameters, (parameter) => parameter.name),
+    ["email"],
+  );
+  assert.equal(
+    form.actions.some((action) => action.kind === "click"),
+    false,
+  );
+  const names = interactions(batch, "action").map((item) => item.name);
+  assert.equal(names.includes("Place order"), true);
+  assert.equal(names.includes("Reset standalone"), true);
+  assert.equal(
+    interactions(batch, "control").some((item) => item.parameters?.[0]?.name === "checkoutButton"),
+    false,
+  );
+});
+
+test("form tools are fill-only on a two-submit form", async () => {
+  const dom = page(`
+    <form aria-label="Login">
+      <label for="user">User</label>
+      <input id="user" required>
+      <label for="note">Note</label>
+      <input id="note">
+      <button type="submit">Save</button>
+      <button type="submit">Save and continue</button>
+    </form>
+  `);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  const form = interactions(batch, "form")[0];
+  assert.deepEqual(
+    Array.from(form.parameters, (parameter) => parameter.name),
+    ["user", "note"],
+  );
+  assert.equal(form.actions.some((action) => action.kind === "click"), false);
+  assert.deepEqual(
+    Array.from(interactions(batch, "action"), (item) => item.name),
+    ["Save", "Save and continue"],
+  );
+});
+
+test("unique CSS among sibling shadow hosts", async () => {
+  const html = await readFile(resolve(repositoryRoot, "testdata", "corpus", "sibling-shadow.html"), "utf8");
+  const dom = page(html);
+  const upgrade = (root) => {
+    for (const host of [...root.querySelectorAll("*")]) {
+      if (host.shadowRoot) continue;
+      const template = [...host.children].find(
+        (child) => child.localName === "template" && child.hasAttribute("shadowrootmode"),
+      );
+      if (!template) continue;
+      const shadow = host.attachShadow({ mode: "open" });
+      shadow.append(template.content.cloneNode(true));
+      template.remove();
+      upgrade(shadow);
+    }
+  };
+  upgrade(dom.window.document);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  const alpha = interactions(batch, "action").find((item) => item.name === "Alpha");
+  const beta = interactions(batch, "action").find((item) => item.name === "Beta");
+  assert.ok(alpha && beta);
+  const alphaHost = alpha.locators[0].shadowPath.at(-1).css;
+  const betaHost = beta.locators[0].shadowPath.at(-1).css;
+  assert.notEqual(alphaHost, betaHost);
+  assert.match(alphaHost, /nth-of-type/u);
+  assert.match(betaHost, /nth-of-type/u);
+});
+
+// jsdom 30 does not implement exclusive <details name>. The toggle handler
+// here simulates that accordion so restore must reopen siblings it did not open.
+test("safe exploration restores every observed details open state", async () => {
+  const html = `
+    <details open><summary>One</summary><button>First</button></details>
+    <details><summary>Two</summary><button>Second</button></details>
+  `;
+  const dom = page(html, (window) => {
+    hideClosedDetailsContent(window);
+    window.document.querySelectorAll("details").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        if (!details.open) return;
+        window.document.querySelectorAll("details").forEach((other) => {
+          if (other !== details) other.open = false;
+        });
+      });
+    });
+  });
+  await dom.window.__GEOVISOR_EXTRACT__({
+    safeExplore: true,
+    maxDepth: 1,
+    maxOperations: 1,
+  });
+  const details = dom.window.document.querySelectorAll("details");
+  assert.equal(details[0].open, true);
+  assert.equal(details[1].open, false);
 });
 
 test("matches the shared Go and Node observation fixture", async () => {

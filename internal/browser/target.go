@@ -98,8 +98,25 @@ func selectTarget(
 				len(candidates),
 			)
 		}
+		return nil, fmt.Errorf(
+			"no matching top-level HTTP(S) target: found 0 HTTP(S) pages; %d non-HTTP(S) tab(s) were ignored",
+			countIgnoredTopLevelTabs(targets),
+		)
 	}
 	return nil, errors.New("no matching top-level HTTP(S) target")
+}
+
+func countIgnoredTopLevelTabs(targets []*proto.TargetTargetInfo) int {
+	count := 0
+	for _, target := range targets {
+		if target == nil || target.Type != proto.TargetTargetInfoTypePage {
+			continue
+		}
+		if _, err := validateTargetURL(target.URL); err != nil {
+			count++
+		}
+	}
+	return count
 }
 
 func canonicalTopLevelTargets(targets []*proto.TargetTargetInfo) []*proto.TargetTargetInfo {

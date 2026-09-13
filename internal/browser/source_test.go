@@ -75,6 +75,12 @@ func TestEndpointAndSelectorValidation(t *testing.T) {
 	}
 
 	invalid = options
+	invalid.Endpoint = "http://user:pass@127.0.0.1:9222"
+	if err := validateAttachOptions(&invalid); err == nil {
+		t.Fatal("CDP endpoint credentials unexpectedly accepted")
+	}
+
+	invalid = options
 	invalid.Selector.TargetID = "also-set"
 	if err := validateAttachOptions(&invalid); err == nil {
 		t.Fatal("ambiguous target selector unexpectedly accepted")
@@ -93,6 +99,18 @@ func TestSelectTargetDeterministically(t *testing.T) {
 
 	if _, err := selectTarget(targets, TargetSelector{Mode: SelectActiveTopLevel}); err == nil {
 		t.Fatal("active selector unexpectedly chose a page among several top-level candidates")
+	}
+
+	_, err := selectTarget(
+		[]*proto.TargetTargetInfo{
+			{TargetID: "internal", Type: proto.TargetTargetInfoTypePage, URL: "chrome://settings"},
+			{TargetID: "blank", Type: proto.TargetTargetInfoTypePage, URL: "about:blank"},
+		},
+		TargetSelector{Mode: SelectActiveTopLevel},
+	)
+	if err == nil || !strings.Contains(err.Error(), "found 0 HTTP(S) pages") ||
+		!strings.Contains(err.Error(), "2 non-HTTP(S) tab(s) were ignored") {
+		t.Fatalf("active selector error = %v", err)
 	}
 
 	selected, err := selectTarget(
@@ -135,6 +153,9 @@ func TestSanitizedErrorRedactsEndpointSecrets(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "redacted") {
 		t.Fatalf("sanitized error has no redaction marker: %s", rendered)
+	}
+	if strings.Contains(rendered, "/devtools/browser/id") {
+		t.Fatalf("sanitized error leaked the DevTools path token: %s", rendered)
 	}
 }
 

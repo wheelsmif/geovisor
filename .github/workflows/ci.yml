@@ -108,7 +108,7 @@ jobs:
           # path on the OS that can actually run the browser layer. Windows and
           # macOS quality legs still skip browser tests; the Browser job is the
           # required Chromium gate. Chrome is the image's preinstalled binary
-          # (no extra supply-chain pin).
+          # on purpose (P16): do not add a third-party setup-chrome action.
           GEOVISOR_REQUIRE_BROWSER: ${{ runner.os == 'Linux' && '1' || '' }}
         run: go test ./...
 
@@ -132,6 +132,7 @@ jobs:
       - run: npm ci
       # The browser tests skip silently when no Chromium is found, so assert the
       # runner actually has one before relying on GEOVISOR_REQUIRE_BROWSER.
+      # Chrome is the image binary on purpose (no extra supply-chain pin; P16).
       - name: Report Chrome version
         run: google-chrome --version
       - name: Test browser-backed packages

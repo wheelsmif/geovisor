@@ -94,6 +94,48 @@ function lookupRoot(element: Element): Document | ShadowRoot | null {
   return typeof root.getElementById === "function" ? root : null;
 }
 
+/**
+ * Reports whether an element carries a current value that ACCNAME must skip.
+ *
+ * Accessible-name computation does not include the contents of embedded
+ * controls. `textarea.textContent` is the current value, so treating it as
+ * name text leaked drafts and PII (P20).
+ */
+export function isValueBearingControl(element: Element): boolean {
+  const tag = element.localName;
+  if (tag === "textarea" || tag === "select") return true;
+  if (tag === "input") return inputType(element) !== "hidden";
+  const editable = element.getAttribute("contenteditable");
+  if (editable === null) return false;
+  const normalized = editable.trim().toLowerCase();
+  return normalized === "" || normalized === "true" || normalized === "plaintext-only";
+}
+
+/**
+ * Concatenates descendant text while skipping embedded controls and `skip`.
+ *
+ * This is the ACCNAME "name from contents" walk used for labels and
+ * aria-labelledby / aria-describedby targets.
+ */
+export function subtreeNameText(element: Element | null, skip: Element | null = null): string {
+  if (!element) return "";
+  return cleanText(collectNameText(element, skip));
+}
+
+function collectNameText(node: Node, skip: Element | null): string {
+  if (skip && node === skip) return "";
+  if (isTextNode(node)) return node.textContent ?? "";
+  if (node.nodeType !== 1) return "";
+  const element = node as Element;
+  if (element !== skip && isValueBearingControl(element)) return "";
+  let text = "";
+  for (const child of Array.from(element.childNodes)) {
+    const piece = collectNameText(child, skip);
+    if (piece) text += ` ${piece}`;
+  }
+  return text;
+}
+
 /** Resolves an IDREF list attribute to the concatenated text of its targets. */
 export function referencedText(
   element: Element,
@@ -105,8 +147,9 @@ export function referencedText(
   if (!root) return "";
   return cleanText(
     ids
-      .map((id) => read("", () => cleanText(root.getElementById(id)?.textContent)))
+      .map((id) => read("", () => subtreeNameText(root.getElementById(id), element)))
       .filter(Boolean)
       .join(" "),
+    limit,
   );
 }

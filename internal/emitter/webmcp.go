@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/url"
 
 	"github.com/wheelsmif/geovisor/internal/tir"
 )
@@ -54,11 +55,15 @@ func (WebMCP) Emit(
 		return Result{}, err
 	}
 	definitions := make([]webMCPDefinition, 0, len(canonical.Tools))
+	pageOrigin := webMCPPageOrigin(canonical.Source)
 	for ti := range canonical.Tools {
 		if err := canceled(ctx, FormatWebMCP); err != nil {
 			return Result{}, err
 		}
-		tool := &canonical.Tools[ti]
+		tool := filterWebMCPTool(&canonical.Tools[ti], pageOrigin, canonical.FrameCoverage)
+		if tool == nil {
+			continue
+		}
 		for ai, action := range tool.Actions {
 			if len(action.LocatorCandidateIDs) == 0 {
 				return Result{}, failure(
@@ -99,6 +104,127 @@ func (WebMCP) Emit(
 		MediaType: "text/javascript",
 		Data:      data,
 	}}, nil
+}
+
+func webMCPPageOrigin(source tir.SourceMetadata) string {
+	if origin := originOfURL(source.FinalURL); origin != "" {
+		return origin
+	}
+	return originOfURL(source.RequestedURL)
+}
+
+func originOfURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+func filterWebMCPTool(tool *tir.Tool, pageOrigin string, coverage tir.FrameCoverage) *tir.Tool {
+	for _, action := range tool.Actions {
+		if len(action.LocatorCandidateIDs) == 0 {
+			return tool
+		}
+	}
+	keep := make(map[string]tir.LocatorCandidate, len(tool.Locators))
+	locators := make([]tir.LocatorCandidate, 0, len(tool.Locators))
+	for _, locator := range tool.Locators {
+		if !locatorResolvableInPage(locator, pageOrigin, coverage) {
+			continue
+		}
+		keep[locator.ID] = locator
+		locators = append(locators, locator)
+	}
+	if len(locators) == 0 {
+		return nil
+	}
+	actions := make([]tir.ActionBinding, 0, len(tool.Actions))
+	for _, action := range tool.Actions {
+		ids := make([]string, 0, len(action.LocatorCandidateIDs))
+		for _, id := range action.LocatorCandidateIDs {
+			if _, ok := keep[id]; ok {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		action.LocatorCandidateIDs = ids
+		actions = append(actions, action)
+	}
+	filtered := *tool
+	filtered.Locators = locators
+	filtered.Actions = actions
+	return &filtered
+}
+
+func locatorResolvableInPage(locator tir.LocatorCandidate, pageOrigin string, coverage tir.FrameCoverage) bool {
+	if len(locator.FramePath) == 0 {
+		return true
+	}
+	if framePathUncovered(locator.FramePath, coverage) {
+		return false
+	}
+	origin, src, covered := coverageOriginForFramePath(locator.FramePath, coverage)
+	if !covered {
+		return true
+	}
+	if pageOrigin != "" {
+		if origin != "" && origin != pageOrigin {
+			return false
+		}
+		if srcOrigin := originOfURL(src); srcOrigin != "" && srcOrigin != pageOrigin {
+			return false
+		}
+	}
+	return true
+}
+
+func framePathUncovered(path []tir.PathNode, coverage tir.FrameCoverage) bool {
+	indexes := framePathIndexes(path)
+	for _, frame := range coverage.Uncovered {
+		if frameIndexesMatch(frame.Path, indexes) {
+			return true
+		}
+	}
+	return false
+}
+
+func framePathIndexes(path []tir.PathNode) []int {
+	indexes := make([]int, len(path))
+	for i, node := range path {
+		if node.Semantic != nil {
+			indexes[i] = node.Semantic.Nth
+		}
+	}
+	return indexes
+}
+
+func frameIndexesMatch(path []tir.FrameReference, indexes []int) bool {
+	if len(path) != len(indexes) {
+		return false
+	}
+	for i, node := range path {
+		if node.Index != indexes[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func coverageOriginForFramePath(path []tir.PathNode, coverage tir.FrameCoverage) (origin, src string, covered bool) {
+	indexes := framePathIndexes(path)
+	for _, frame := range coverage.Frames {
+		if frameIndexesMatch(frame.Path, indexes) {
+			src = ""
+			if len(frame.Path) > 0 {
+				src = frame.Path[len(frame.Path)-1].Src
+			}
+			return frame.Origin, src, true
+		}
+	}
+	return "", "", false
 }
 
 func deriveWebMCPAnnotations(actions []tir.ActionBinding) webMCPAnnotations {

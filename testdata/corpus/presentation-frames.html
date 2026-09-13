@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>GEO-Visor presentation-role frames</title>
+  </head>
+  <body>
+    <!--
+      Both walks count iframe/frame by localName, not computed role (P9).
+      A role=presentation iframe still occupies index 0; the later iframe is 1.
+    -->
+    <iframe role="presentation" srcdoc="<input aria-label='Query'>"></iframe>
+    <iframe srcdoc="<input aria-label='Query'>"></iframe>
+  </body>
+</html>

@@ -24,8 +24,13 @@ var errEndpointRedirect = errors.New("CDP endpoint redirected")
 
 func newEndpointClient() *http.Client {
 	return &http.Client{
-		Timeout: endpointRequestTimeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
+		Timeout:   endpointRequestTimeout,
+		Transport: &http.Transport{Proxy: nil},
+		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
+			if request.Response != nil && request.Response.Body != nil {
+				_, _ = io.Copy(io.Discard, io.LimitReader(request.Response.Body, maxEndpointResponse))
+				_ = request.Response.Body.Close()
+			}
 			return errEndpointRedirect
 		},
 	}
@@ -96,5 +101,25 @@ func resolveControlURL(ctx context.Context, endpoint string) (string, error) {
 	if err != nil || resolved.Host == "" || resolved.Scheme != "ws" && resolved.Scheme != "wss" {
 		return "", errors.New("CDP version response contains an invalid WebSocket URL")
 	}
-	return resolved.String(), nil
+	pinned, err := pinDebuggerURL(parsed, resolved)
+	if err != nil {
+		return "", err
+	}
+	return pinned.String(), nil
+}
+
+func pinDebuggerURL(endpoint, advertised *url.URL) (*url.URL, error) {
+	if advertised == nil || advertised.Host == "" || advertised.Scheme != "ws" && advertised.Scheme != "wss" {
+		return nil, errors.New("CDP version response contains an invalid WebSocket URL")
+	}
+	pinned := *advertised
+	pinned.User = nil
+	pinned.Host = endpoint.Host
+	switch endpoint.Scheme {
+	case "https", "wss":
+		pinned.Scheme = "wss"
+	default:
+		pinned.Scheme = "ws"
+	}
+	return &pinned, nil
 }

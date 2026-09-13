@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +19,8 @@ import (
 	"github.com/wheelsmif/geovisor/internal/observation"
 	"github.com/wheelsmif/geovisor/internal/tir"
 )
+
+var disambiguatedName = regexp.MustCompile(` \(\d+\)$`)
 
 // Input contains every observation batch for one browser session.
 type Input struct {
@@ -29,10 +33,15 @@ type Error struct {
 	Field   string
 	Code    string
 	Message string
+	err     error
 }
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s (%s)", e.Field, e.Message, e.Code)
+}
+
+func (e *Error) Unwrap() error {
+	return e.err
 }
 
 func compileContext(ctx context.Context) error {
@@ -40,7 +49,7 @@ func compileContext(ctx context.Context) error {
 		return &Error{Field: "context", Code: "canceled", Message: "context must not be nil"}
 	}
 	if err := ctx.Err(); err != nil {
-		return &Error{Field: "context", Code: "canceled", Message: err.Error()}
+		return &Error{Field: "context", Code: "canceled", Message: err.Error(), err: err}
 	}
 	return nil
 }
@@ -113,8 +122,8 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 	document := tir.NewDocument(tir.SourceMetadata{
 		Kind:              tir.SourceKind(input.Source.Kind),
 		ExecutionBoundary: tir.ExecutionAgentOwned,
-		RequestedURL:      cleanText(input.Source.RequestedURL),
-		FinalURL:          cleanText(input.Source.FinalURL),
+		RequestedURL:      pageURL(input.Source.RequestedURL),
+		FinalURL:          pageURL(input.Source.FinalURL),
 		StealthEnabled:    input.Source.StealthEnabled,
 	})
 
@@ -142,7 +151,7 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 			}
 			if frame.Accessible {
 				accumulator.accessible = true
-				accumulator.urls = appendNonempty(accumulator.urls, cleanText(frame.URL))
+				accumulator.urls = appendNonempty(accumulator.urls, pageURL(frame.URL))
 				accumulator.origins = appendNonempty(accumulator.origins, cleanText(frame.Origin))
 			} else {
 				accumulator.inaccessible = true
@@ -392,16 +401,17 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 		}
 	}
 
-	scope := normalizeSemanticNodes(source.Scope)
+	scope, err := compileObservationSemanticNodes(field+".scope", source.Scope)
+	if err != nil {
+		return result, nil, err
+	}
 	identityParts := []string{
 		string(source.Kind), observationFramePathKey(result.framePath),
-		semanticNodesKey(scope), result.role, canonicalText(name),
+		semanticNodesKey(scope), result.role, canonicalText(identityName(name)),
 	}
-	if cleanText(source.Name) == "" {
-		keys := append([]string(nil), identityLocatorKeys...)
-		sort.Strings(keys)
-		identityParts = append(identityParts, strings.Join(keys, "\x1e"))
-	}
+	keys := append([]string(nil), identityLocatorKeys...)
+	sort.Strings(keys)
+	identityParts = append(identityParts, strings.Join(keys, "\x1e"))
 	result.identity = joinedKey(identityParts...)
 	return result, warnings, nil
 }
@@ -452,7 +462,7 @@ func compileTools(accumulators map[string]*toolAccumulator, warnings *[]pendingW
 	keys := sortedMapKeys(accumulators)
 	ids := stableIDs(keys, func(key string) string {
 		accumulator := accumulators[key]
-		return slug(chooseDisplay(accumulator.names), "tool") + "-" + digest(key)
+		return slug(identityName(chooseDisplay(accumulator.names)), "tool") + "-" + digest(key)
 	})
 	result := make([]compiledTool, 0, len(keys))
 	for _, key := range keys {
@@ -737,16 +747,31 @@ func compileProperties(field string, source []observation.ParameterProperty) ([]
 }
 
 func compileLocator(field string, source observation.Locator) (tir.LocatorCandidate, []observation.Evidence, error) {
+	framePath, err := compilePathNodes(field+".framePath", source.FramePath)
+	if err != nil {
+		return tir.LocatorCandidate{}, nil, err
+	}
+	shadowPath, err := compilePathNodes(field+".shadowPath", source.ShadowPath)
+	if err != nil {
+		return tir.LocatorCandidate{}, nil, err
+	}
 	result := tir.LocatorCandidate{
-		FramePath:   compilePathNodes(source.FramePath),
-		ShadowPath:  compilePathNodes(source.ShadowPath),
+		FramePath:   framePath,
+		ShadowPath:  shadowPath,
 		CSSFallback: cleanText(source.CSS),
 	}
 	if source.Semantic != nil {
+		scope, scopeErr := compileTIRSemanticNodes(field+".semantic.scope", source.Semantic.Scope)
+		if scopeErr != nil {
+			return result, nil, scopeErr
+		}
+		if err := rejectNegativeNth(field+".semantic.nth", source.Semantic.Nth); err != nil {
+			return result, nil, err
+		}
 		result.Semantic = &tir.SemanticLocator{
-			Scope: compileSemanticNodes(source.Semantic.Scope),
+			Scope: scope,
 			Role:  canonicalText(source.Semantic.Role), Name: cleanText(source.Semantic.Name),
-			Nth: normalizeNth(source.Semantic.Nth),
+			Nth: source.Semantic.Nth,
 		}
 	}
 	evidence := make([]observation.Evidence, 0, len(source.Evidence))
@@ -762,52 +787,63 @@ func compileLocator(field string, source observation.Locator) (tir.LocatorCandid
 	return result, evidence, nil
 }
 
-func compilePathNodes(source []observation.PathNode) []tir.PathNode {
+func compilePathNodes(field string, source []observation.PathNode) ([]tir.PathNode, error) {
 	result := make([]tir.PathNode, len(source))
 	for i, node := range source {
+		path := fmt.Sprintf("%s[%d]", field, i)
 		result[i].CSSFallback = cleanText(node.CSS)
 		if node.Semantic != nil {
+			if err := rejectNegativeNth(path+".semantic.nth", node.Semantic.Nth); err != nil {
+				return nil, err
+			}
 			result[i].Semantic = &tir.SemanticNode{
 				Role: canonicalText(node.Semantic.Role), Name: cleanText(node.Semantic.Name),
-				Nth: normalizeNth(node.Semantic.Nth),
+				Nth: node.Semantic.Nth,
 			}
 		}
 	}
-	return result
+	return result, nil
 }
 
-func compileSemanticNodes(source []observation.SemanticNode) []tir.SemanticNode {
+func compileTIRSemanticNodes(field string, source []observation.SemanticNode) ([]tir.SemanticNode, error) {
 	result := make([]tir.SemanticNode, len(source))
 	for i, node := range source {
+		if err := rejectNegativeNth(fmt.Sprintf("%s[%d].nth", field, i), node.Nth); err != nil {
+			return nil, err
+		}
 		result[i] = tir.SemanticNode{
 			Role: canonicalText(node.Role),
 			Name: cleanText(node.Name),
-			Nth:  normalizeNth(node.Nth),
+			Nth:  node.Nth,
 		}
 	}
-	return result
+	return result, nil
 }
 
-func normalizeSemanticNodes(source []observation.SemanticNode) []observation.SemanticNode {
+func compileObservationSemanticNodes(field string, source []observation.SemanticNode) ([]observation.SemanticNode, error) {
 	result := make([]observation.SemanticNode, len(source))
 	for i, node := range source {
+		if err := rejectNegativeNth(fmt.Sprintf("%s[%d].nth", field, i), node.Nth); err != nil {
+			return nil, err
+		}
 		result[i] = observation.SemanticNode{
 			Role: canonicalText(node.Role),
 			Name: cleanText(node.Name),
-			Nth:  normalizeNth(node.Nth),
+			Nth:  node.Nth,
 		}
 	}
-	return result
+	return result, nil
 }
 
-// normalizeNth clamps a match ordinal to a meaningful value. A negative index
-// addresses nothing, so it is treated as "the first match" rather than carried
-// into TIR where it would emit a locator no consumer can resolve.
-func normalizeNth(nth int) int {
+func rejectNegativeNth(field string, nth int) error {
 	if nth < 0 {
-		return 0
+		return &Error{Field: field, Code: "invalid_nth", Message: "must be nonnegative"}
 	}
-	return nth
+	return nil
+}
+
+func identityName(name string) string {
+	return disambiguatedName.ReplaceAllString(name, "")
 }
 
 func aggregateEvidence(evidence map[string]observation.Evidence) (float64, []tir.Provenance) {
@@ -1021,7 +1057,7 @@ func normalizeFrameReferences(path []observation.FrameReference) []observation.F
 	result := make([]observation.FrameReference, len(path))
 	for i, frame := range path {
 		result[i] = observation.FrameReference{
-			Index: frame.Index, Name: cleanText(frame.Name), Src: cleanText(frame.Src),
+			Index: frame.Index, Name: cleanText(frame.Name), Src: pageURL(frame.Src),
 		}
 	}
 	return result
@@ -1145,6 +1181,24 @@ func cleanStrings(values []string) []string {
 
 func cleanText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func pageURL(raw string) string {
+	trimmed := cleanText(raw)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return trimmed
+	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	if parsed.Host == "" {
+		return parsed.String()
+	}
+	return parsed.Scheme + "://" + parsed.Host + parsed.EscapedPath()
 }
 
 func canonicalText(value string) string {

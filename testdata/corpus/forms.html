@@ -20,8 +20,13 @@
 
       <label for="password">Password</label>
       <input id="password" type="password" value="CURRENT-PASSWORD-SECRET">
+      <label>Bio <textarea>TEXTAREA-SECRET</textarea></label>
       <button type="submit">Save profile</button>
     </form>
+    <textarea id="src">LABELLEDBY-SECRET</textarea>
+    <input aria-label="Cited" aria-labelledby="src">
+    <textarea id="hint">DESCRIBED-SECRET</textarea>
+    <input aria-label="Noted" aria-describedby="hint">
 
     <section role="region" aria-label="Primary filters">
       <input aria-label="Query" value="CURRENT-QUERY-SECRET">
