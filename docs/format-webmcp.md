@@ -29,7 +29,12 @@ the wrong frame rather than report that it cannot resolve.
 
 It supports click, fill, select, and check bindings, checks cancellation between
 actions, and reports the tool, action index, action kind, and locator failures
-when execution fails. Fill and check assign through the element's native
+when execution fails. When a click or check binding names `inputParameter`
+`target`, the runtime selects the locator whose family display name (semantic
+name, plus a `Name (2)` ordinal when members share a name) equals the argument.
+A mismatch fails with `target does not match a locator` instead of activating
+the first candidate. Fill, select, and check-with-value bindings still treat
+the named parameter as the value to apply. Fill and check assign through the element's native
 prototype setter when the owning window exposes one, then dispatch a bubbling
 `InputEvent` (and `change`). That is enough for many framework-controlled
 inputs; it is not a React-specific adapter, and a library that ignores native

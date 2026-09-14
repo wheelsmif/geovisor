@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -405,6 +406,282 @@ func TestCompileIdentityIgnoresDisplayNameOrdinals(t *testing.T) {
 	}
 }
 
+func TestCompileCollapsesSameFrameLinksIntoFollowLink(t *testing.T) {
+	t.Parallel()
+
+	document, err := Compile(context.Background(), Input{
+		Source: observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{
+			Interactions: []observation.Interaction{
+				linkInteraction("CSS", "/wiki/CSS"),
+				linkInteraction("HTML", "/wiki/HTML"),
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(document.Tools) != 1 {
+		t.Fatalf("tools = %d, want one family tool", len(document.Tools))
+	}
+	tool := document.Tools[0]
+	if tool.Name != "Follow link" {
+		t.Fatalf("name = %q, want Follow link", tool.Name)
+	}
+	if len(tool.Parameters) != 1 || tool.Parameters[0].Name != "target" || !tool.Parameters[0].Required {
+		t.Fatalf("parameters = %#v, want required target", tool.Parameters)
+	}
+	if got := tool.Parameters[0].Enum; len(got) != 2 || got[0] != "CSS" || got[1] != "HTML" {
+		t.Fatalf("target enum = %v, want CSS, HTML", tool.Parameters[0].Enum)
+	}
+	if len(tool.Locators) != 2 {
+		t.Fatalf("locators = %d, want 2", len(tool.Locators))
+	}
+	if len(tool.Actions) != 1 {
+		t.Fatalf("actions = %d, want 1", len(tool.Actions))
+	}
+	action := tool.Actions[0]
+	if action.Action != tir.ActionClick || action.InputParameter != "target" {
+		t.Fatalf("action = %#v, want click with inputParameter target", action)
+	}
+	if action.SideEffect.Class != tir.SideEffectNavigation || action.SideEffect.SafeForExploration {
+		t.Fatalf("side effect = %#v, want unsafe navigation", action.SideEffect)
+	}
+	if len(action.LocatorCandidateIDs) != 2 {
+		t.Fatalf("locator refs = %d, want both family members", len(action.LocatorCandidateIDs))
+	}
+	assertActionsReferenceCompiledLocators(t, tool)
+}
+
+func TestCompileKeepsUniqueButtonAsSingleton(t *testing.T) {
+	t.Parallel()
+
+	document, err := Compile(context.Background(), Input{
+		Source: observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{
+			Interactions: []observation.Interaction{
+				buttonInteraction("Save", observation.SideEffectUnknown),
+				linkInteraction("HTML", "/wiki/HTML"),
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	save := findToolByName(t, document, "Save")
+	if len(save.Parameters) != 0 {
+		t.Fatalf("unique Save must not grow a target parameter, got %#v", save.Parameters)
+	}
+	if save.Actions[0].InputParameter != "" {
+		t.Fatalf("unique Save inputParameter = %q, want empty", save.Actions[0].InputParameter)
+	}
+	follow := findToolByName(t, document, "Follow link")
+	if follow.Parameters[0].Name != "target" {
+		t.Fatalf("single leftover link must still be a family tool, got %#v", follow.Parameters)
+	}
+}
+
+func TestCompileDropsLowValueActions(t *testing.T) {
+	t.Parallel()
+
+	document, err := Compile(context.Background(), Input{
+		Source: observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{
+			Interactions: []observation.Interaction{
+				linkInteraction("[1]", "#cite_note-1"),
+				linkInteraction("10.1000/xyz123", "https://doi.org/10.1000/xyz123"),
+				linkInteraction("RFC 9110", "/wiki/RFC_9110"),
+				{
+					Kind: observation.InteractionAction,
+					Role: "link",
+					Name: "See also",
+					Locators: []observation.Locator{{
+						Semantic: &observation.SemanticLocator{Role: "link", Name: "See also"},
+						CSS:      `a[href="#cite_note-HTML-1"]`,
+						Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:a", Score: 0.7}},
+					}},
+					Actions: []observation.Action{{
+						Kind:       observation.ActionClick,
+						SideEffect: observation.SideEffect{Class: observation.SideEffectNavigation},
+					}},
+					Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:a", Score: 0.6}},
+				},
+				{
+					Kind: observation.InteractionAction,
+					Role: "link",
+					Locators: []observation.Locator{{
+						Semantic: &observation.SemanticLocator{Role: "link"},
+						Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:a", Score: 0.7}},
+					}},
+					Actions: []observation.Action{{
+						Kind:       observation.ActionClick,
+						SideEffect: observation.SideEffect{Class: observation.SideEffectNavigation},
+					}},
+					Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:a", Score: 0.6}},
+				},
+				linkInteraction("HTML", "/wiki/HTML"),
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(document.Tools) != 1 {
+		t.Fatalf("tools = %d, want only the named article link", len(document.Tools))
+	}
+	tool := document.Tools[0]
+	if tool.Name != "Follow link" {
+		t.Fatalf("kept tool = %q, want Follow link", tool.Name)
+	}
+	if got := tool.Parameters[0].Enum; len(got) != 1 || got[0] != "HTML" {
+		t.Fatalf("target enum = %v, want HTML", tool.Parameters[0].Enum)
+	}
+	assertWarning(t, document, warningDroppedLowValueAction)
+}
+
+func TestCompileFamilyIDStableWhenUnrelatedSingletonInserted(t *testing.T) {
+	t.Parallel()
+
+	links := []observation.Interaction{
+		linkInteraction("CSS", "/wiki/CSS"),
+		linkInteraction("HTML", "/wiki/HTML"),
+	}
+	baseline, err := Compile(context.Background(), Input{
+		Source:  observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{Interactions: links}},
+	})
+	if err != nil {
+		t.Fatalf("compile baseline: %v", err)
+	}
+	if len(baseline.Tools) != 1 {
+		t.Fatalf("baseline tools = %d, want 1", len(baseline.Tools))
+	}
+
+	shifted, err := Compile(context.Background(), Input{
+		Source: observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{
+			Interactions: []observation.Interaction{
+				buttonInteraction("Elsewhere", observation.SideEffectUnknown),
+				links[0],
+				links[1],
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("compile shifted: %v", err)
+	}
+	if toolID(t, shifted, baseline.Tools[0].Name, baseline.Tools[0].Description) != baseline.Tools[0].ID {
+		t.Fatalf(
+			"unrelated earlier singleton changed family ID from %q to %q",
+			baseline.Tools[0].ID,
+			toolID(t, shifted, baseline.Tools[0].Name, baseline.Tools[0].Description),
+		)
+	}
+}
+
+func TestCompileDoesNotFoldSubmitIntoFamilyOrForm(t *testing.T) {
+	t.Parallel()
+
+	order0 := 0
+	form := observation.Interaction{
+		Kind: observation.InteractionForm,
+		Role: "form",
+		Name: "Login",
+		Parameters: []observation.Parameter{
+			{Name: "user", Type: observation.ValueString, Required: true, SourceOrder: &order0},
+		},
+		Locators: []observation.Locator{{
+			Semantic: &observation.SemanticLocator{Role: "textbox", Name: "User"},
+			Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:input", Score: 0.7}},
+		}},
+		Actions: []observation.Action{{
+			Kind: observation.ActionFill, InputParameter: "user",
+			SideEffect: observation.SideEffect{Class: observation.SideEffectUnknown},
+		}},
+		Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:form", Score: 0.6}},
+	}
+	save := buttonInteraction("Save", observation.SideEffectSubmission)
+	save.Locators[0].CSS = `button[type="submit"]`
+	continueSave := buttonInteraction("Save and continue", observation.SideEffectSubmission)
+	continueSave.Locators[0].CSS = `button[type="submit"]`
+
+	document, err := Compile(context.Background(), Input{
+		Source: observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{
+			Interactions: []observation.Interaction{form, save, continueSave},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(document.Tools) != 3 {
+		t.Fatalf("tools = %d, want form plus two standalone submits", len(document.Tools))
+	}
+	login := findToolByName(t, document, "Login")
+	if len(login.Parameters) != 1 || login.Parameters[0].Name != "user" {
+		t.Fatalf("form parameters = %#v, want fill-only user", login.Parameters)
+	}
+	for _, action := range login.Actions {
+		if action.Action == tir.ActionClick {
+			t.Fatal("form tool must stay fill-only")
+		}
+	}
+	findToolByName(t, document, "Save")
+	findToolByName(t, document, "Save and continue")
+}
+
+func TestCompileFamilyTargetOrdinalsAreBijective(t *testing.T) {
+	t.Parallel()
+
+	first := linkInteraction("Next", "/a")
+	first.Locators[0].Semantic.Nth = 0
+	second := linkInteraction("Next", "/b")
+	second.Name = "Next (2)"
+	second.Locators[0].Semantic.Nth = 1
+
+	document, err := Compile(context.Background(), Input{
+		Source:  observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{Interactions: []observation.Interaction{first, second}}},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	tool := findToolByName(t, document, "Follow link")
+	if got := tool.Parameters[0].Enum; len(got) != 2 || got[0] != "Next" || got[1] != "Next (2)" {
+		t.Fatalf("target enum = %v, want Next, Next (2)", tool.Parameters[0].Enum)
+	}
+	if len(tool.Locators) != 2 {
+		t.Fatalf("locators = %d, want one per member", len(tool.Locators))
+	}
+}
+
+func TestCompileOmitsFamilyEnumAboveCap(t *testing.T) {
+	t.Parallel()
+
+	interactions := make([]observation.Interaction, 0, familyEnumCap+1)
+	for i := 0; i < familyEnumCap+1; i++ {
+		name := fmt.Sprintf("Link %02d", i)
+		interactions = append(interactions, linkInteraction(name, "/"+name))
+	}
+	document, err := Compile(context.Background(), Input{
+		Source:  observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{Interactions: interactions}},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	tool := findToolByName(t, document, "Follow link")
+	if len(tool.Parameters[0].Enum) != 0 {
+		t.Fatalf("enum length = %d, want omitted above cap", len(tool.Parameters[0].Enum))
+	}
+	if tool.Description != familyToolDescription() {
+		t.Fatalf("description = %q, want target-name guidance", tool.Description)
+	}
+	if len(tool.Locators) != familyEnumCap+1 {
+		t.Fatalf("locators = %d, want every family member", len(tool.Locators))
+	}
+}
+
 func BenchmarkCompileAndMarshal(b *testing.B) {
 	input := fixtureInput()
 	b.ReportAllocs()
@@ -562,6 +839,64 @@ func findTool(t *testing.T, document *tir.Document, name string) tir.Tool {
 	}
 	t.Fatalf("tool %q not found", name)
 	return tir.Tool{}
+}
+
+func findToolByName(t *testing.T, document *tir.Document, name string) tir.Tool {
+	t.Helper()
+	for _, tool := range document.Tools {
+		if tool.Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("tool %q not found among %v", name, toolNames(document))
+	return tir.Tool{}
+}
+
+func toolNames(document *tir.Document) []string {
+	names := make([]string, 0, len(document.Tools))
+	for _, tool := range document.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func linkInteraction(name, href string) observation.Interaction {
+	css := "a"
+	if href != "" {
+		css = fmt.Sprintf("a[href=%q]", href)
+	}
+	return observation.Interaction{
+		Kind: observation.InteractionAction,
+		Role: "link",
+		Name: name,
+		Locators: []observation.Locator{{
+			Semantic: &observation.SemanticLocator{Role: "link", Name: name},
+			CSS:      css,
+			Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:a", Score: 0.7}},
+		}},
+		Actions: []observation.Action{{
+			Kind:       observation.ActionClick,
+			SideEffect: observation.SideEffect{Class: observation.SideEffectNavigation},
+		}},
+		Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:a", Score: 0.6}},
+	}
+}
+
+func buttonInteraction(name string, class observation.SideEffectClass) observation.Interaction {
+	return observation.Interaction{
+		Kind: observation.InteractionAction,
+		Role: "button",
+		Name: name,
+		Locators: []observation.Locator{{
+			Semantic: &observation.SemanticLocator{Role: "button", Name: name},
+			Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:button", Score: 0.7}},
+		}},
+		Actions: []observation.Action{{
+			Kind:       observation.ActionClick,
+			SideEffect: observation.SideEffect{Class: class},
+		}},
+		Evidence: []observation.Evidence{{Kind: observation.EvidenceDOM, Reference: "dom:button", Score: 0.6}},
+	}
 }
 
 func assertWarning(t *testing.T, document *tir.Document, code string) {

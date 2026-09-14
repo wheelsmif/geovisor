@@ -550,6 +550,43 @@ function isAction(element: Element): boolean {
   return ACTION_ROLES.has(explicitRole(element));
 }
 
+const CITATION_MARK = /^\[\d+\]$/u;
+const DOI_NAME =
+  /^(?:doi:\s*)?(?:https?:\/\/(?:dx\.)?doi\.org\/)?10\.\d{4,}\/\S+$/iu;
+const BARE_RFC_OR_DOI = /^(?:doi|rfc\s*\d+)$/iu;
+const CITATION_FRAGMENT = /#(?:cite_note|cite_ref|footnote|fn)(?:[-_.:\d]|$)/iu;
+
+function isCitationHref(element: Element): boolean {
+  const href = element.getAttribute("href");
+  if (!href) return false;
+  const raw = href.trim();
+  let fragment = "";
+  let sameDocument = false;
+  if (raw.startsWith("#")) {
+    fragment = raw;
+    sameDocument = true;
+  } else {
+    try {
+      const resolved = new URL(raw, document.baseURI);
+      const page = new URL(document.baseURI);
+      fragment = resolved.hash;
+      sameDocument = resolved.origin === page.origin && resolved.pathname === page.pathname;
+    } catch {
+      return false;
+    }
+  }
+  return sameDocument && CITATION_FRAGMENT.test(fragment);
+}
+
+/** Citation marks, DOI/RFC tokens, same-document cite fragments, and unnamed links. */
+function isLowValueAction(element: Element): boolean {
+  if (isCitationHref(element)) return true;
+  const role = semanticRole(element) || GENERIC_ROLE;
+  const name = accessibleName(element, role)?.text ?? "";
+  if (role === "link" && name === "") return true;
+  return CITATION_MARK.test(name) || DOI_NAME.test(name) || BARE_RFC_OR_DOI.test(name);
+}
+
 function isFormAssociated(element: Element): boolean {
   const tag = element.localName;
   return (
@@ -894,6 +931,9 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
           explorationEvidence(interaction, element, exploration);
           interactions.push(interaction);
         } else if (isAction(element)) {
+          if (isLowValueAction(element)) {
+            continue;
+          }
           const interaction = actionInteraction(record);
           explorationEvidence(interaction, element, exploration);
           interactions.push(interaction);

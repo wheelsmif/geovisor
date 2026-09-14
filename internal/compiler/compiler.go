@@ -58,6 +58,8 @@ type toolAccumulator struct {
 	identity     string
 	framePath    []observation.FrameReference
 	role         string
+	family       bool
+	familyAction tir.ActionKind
 	names        []string
 	descriptions []string
 	parameters   map[string]*parameterAccumulator
@@ -130,6 +132,8 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 	tools := make(map[string]*toolAccumulator)
 	frames := make(map[string]*frameAccumulator)
 	var warnings []pendingWarning
+	var preparedItems []preparedItem
+	droppedLowValue := 0
 	coverageReported := false
 
 	for batchIndex, batch := range input.Batches {
@@ -188,31 +192,57 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 			if err := validateRawFramePath(field+".framePath", interaction.FramePath); err != nil {
 				return nil, err
 			}
+			if isLowValueAction(interaction) {
+				droppedLowValue++
+				continue
+			}
 			prepared, interactionWarnings, err := prepareInteraction(field, interaction)
 			if err != nil {
 				return nil, err
 			}
-			accumulator := tools[prepared.identity]
-			if accumulator == nil {
-				accumulator = &toolAccumulator{
-					identity:   prepared.identity,
-					framePath:  prepared.framePath,
-					role:       prepared.role,
-					parameters: make(map[string]*parameterAccumulator),
-					locators:   make(map[string]*locatorAccumulator),
-					actions:    make(map[string]*actionAccumulator),
-					evidence:   make(map[string]observation.Evidence),
-				}
-				tools[prepared.identity] = accumulator
+			preparedItems = append(preparedItems, preparedItem{
+				source:   interaction,
+				prepared: prepared,
+				warnings: interactionWarnings,
+			})
+		}
+	}
+
+	if droppedLowValue > 0 {
+		warnings = append(warnings, pendingWarning{
+			code:    warningDroppedLowValueAction,
+			message: fmt.Sprintf("dropped %d low-value action(s) that are not useful capabilities", droppedLowValue),
+		})
+	}
+	assignFamilyIdentities(preparedItems)
+
+	for _, item := range preparedItems {
+		if err := compileContext(ctx); err != nil {
+			return nil, err
+		}
+		prepared := item.prepared
+		accumulator := tools[prepared.identity]
+		if accumulator == nil {
+			accumulator = &toolAccumulator{
+				identity:     prepared.identity,
+				framePath:    prepared.framePath,
+				role:         prepared.role,
+				family:       prepared.family,
+				familyAction: prepared.familyAction,
+				parameters:   make(map[string]*parameterAccumulator),
+				locators:     make(map[string]*locatorAccumulator),
+				actions:      make(map[string]*actionAccumulator),
+				evidence:     make(map[string]observation.Evidence),
 			}
-			accumulator.names = append(accumulator.names, prepared.names...)
-			accumulator.descriptions = append(accumulator.descriptions, prepared.descriptions...)
-			mergeEvidence(accumulator.evidence, prepared.evidence)
-			mergePreparedInteraction(accumulator, prepared)
-			for _, warning := range interactionWarnings {
-				warning.toolKey = accumulator.identity
-				accumulator.warnings = append(accumulator.warnings, warning)
-			}
+			tools[prepared.identity] = accumulator
+		}
+		accumulator.names = append(accumulator.names, prepared.names...)
+		accumulator.descriptions = append(accumulator.descriptions, prepared.descriptions...)
+		mergeEvidence(accumulator.evidence, prepared.evidence)
+		mergePreparedInteraction(accumulator, prepared)
+		for _, warning := range item.warnings {
+			warning.toolKey = accumulator.identity
+			accumulator.warnings = append(accumulator.warnings, warning)
 		}
 	}
 
@@ -233,8 +263,16 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 	return document, nil
 }
 
+type preparedItem struct {
+	source   observation.Interaction
+	prepared preparedInteraction
+	warnings []pendingWarning
+}
+
 type preparedInteraction struct {
 	identity     string
+	family       bool
+	familyAction tir.ActionKind
 	framePath    []observation.FrameReference
 	role         string
 	names        []string
@@ -462,6 +500,7 @@ func mergePreparedInteraction(target *toolAccumulator, source preparedInteractio
 			}
 			target.actions[action.key] = accumulator
 		}
+		accumulator.locatorKeys = sortedUniqueStrings(append(accumulator.locatorKeys, action.locatorKeys...))
 		accumulator.classes[action.value.SideEffect.Class] = struct{}{}
 		accumulator.rationales = appendNonempty(accumulator.rationales, action.value.SideEffect.Rationale)
 		accumulator.allSafe = accumulator.allSafe && action.value.SideEffect.SafeForExploration
@@ -472,7 +511,11 @@ func compileTools(accumulators map[string]*toolAccumulator, warnings *[]pendingW
 	keys := sortedMapKeys(accumulators)
 	ids := stableIDs(keys, func(key string) string {
 		accumulator := accumulators[key]
-		return slug(identityName(chooseDisplay(accumulator.names)), "tool") + "-" + digest(key)
+		name := chooseDisplay(accumulator.names)
+		if accumulator.family {
+			name = familyDisplayName(accumulator.role, accumulator.familyAction)
+		}
+		return slug(identityName(name), "tool") + "-" + digest(key)
 	})
 	result := make([]compiledTool, 0, len(keys))
 	for _, key := range keys {
@@ -487,9 +530,15 @@ func compileTools(accumulators map[string]*toolAccumulator, warnings *[]pendingW
 			},
 			Provenance: provenance,
 		}
-		tool.Parameters = compileParameters(accumulator, warnings)
 		idByLocator := locatorIDs(accumulator, id)
 		tool.Locators = compileLocators(accumulator, idByLocator)
+		if accumulator.family {
+			tool.Name = familyDisplayName(accumulator.role, accumulator.familyAction)
+			tool.Description = familyToolDescription()
+			tool.Parameters = []tir.Parameter{familyTargetParameterSpec(tool.Locators)}
+		} else {
+			tool.Parameters = compileParameters(accumulator, warnings)
+		}
 		tool.Actions = compileActions(accumulator, idByLocator, tool.Locators, warnings)
 		result = append(result, compiledTool{key: key, tool: tool})
 	}

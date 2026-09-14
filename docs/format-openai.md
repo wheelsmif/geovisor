@@ -6,7 +6,7 @@ The emitter uses the unwrapped OpenAI Responses API function-tool array shape
 documented on `2026-09-04`:
 
 ```json
-[{"type":"function","name":"example","parameters":{"type":"object","properties":{},"additionalProperties":false},"strict":false}]
+[{"type":"function","name":"follow_link","description":"target is the control's accessible name","parameters":{"type":"object","properties":{"target":{"type":"string","enum":["CSS","HTML"]}},"required":["target"],"additionalProperties":false},"strict":false}]
 ```
 
 This is not the nested Chat Completions

@@ -59,14 +59,24 @@ WebMCP, MCP, or OpenAI tool formats.
 - Page URLs in TIR are origin+path only. Query strings and fragments are
   stripped from source URLs, frame coverage URLs, and frame `src` values.
 - A form tool is fill-only. Submit controls are standalone actions.
+- Same-role, same-action families in one frame compile as one parameterized
+  TIR tool with a required `target` parameter. Links always use that family
+  shape. Unique buttons and submit/reset/image-submit stay standalone.
+- Low-value citation, DOI/RFC, and same-document `#cite` / `#fn` actions are
+  omitted. Collapsed link tools keep `sideEffect.class = navigation` and
+  `safeForExploration = false`.
 
 ## Determinism
 
 Producers preserve stable source order, derive any IDs from stable content, call
-`Normalize` before serialization, and avoid maps in canonical DTOs. All JSON
-collections serialize as arrays, including empty collections. Tool IDs are
-stable across unrelated earlier DOM edits: positional fallback names, display
-name ordinals, and CSS selectors are not part of identity.
+`Normalize` before serialization, and avoid maps in canonical DTOs. Document and
+tool required collections (`tools`, `warnings`, `locatorCandidates`,
+`actionBindings`, `parameters`, and coverage arrays) serialize as arrays,
+including when empty. Empty optional `description`, `enum`, and `properties`
+fields are omitted. `Normalize` still replaces nil slices with empty slices in
+memory. Tool IDs are stable across unrelated earlier DOM edits: positional
+fallback names, display name ordinals, and CSS selectors are not part of
+identity. Family-tool IDs digest family identity, not each member's href.
 
 ## Artifact writes
 

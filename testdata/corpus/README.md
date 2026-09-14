@@ -6,6 +6,9 @@ second loopback origin so Chromium creates a real cross-origin frame/OOPIF.
 
 - `forms.html`: required and optional text, select, checkbox, and password
   controls, duplicate labels in distinct scopes, tabs, dialog, and details.
+- `links.html`: two named article links, citation/DOI/RFC/#cite junk, and one
+  unique button. Used to assert junk actions are omitted and remaining links
+  compile as one family tool. Do not fold this into `frames.html` (GV-003).
 - `spa.html`: bounded asynchronous DOM mutation followed by a stable state.
 - `frames.html`: the GV-003 two-wrapper locator fixture. Two unnamed, otherwise
   identical frames sit in sibling wrappers so only document-order frame indexes

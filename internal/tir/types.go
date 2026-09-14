@@ -7,7 +7,7 @@ import (
 )
 
 // SchemaVersion is the only TIR contract version emitted by this package.
-const SchemaVersion = "1.0.0"
+const SchemaVersion = "1.1.0"
 
 type SourceKind string
 
@@ -112,7 +112,7 @@ type FrameReference struct {
 type Tool struct {
 	ID          string             `json:"id"`
 	Name        string             `json:"name"`
-	Description string             `json:"description"`
+	Description string             `json:"description,omitempty"`
 	Parameters  []Parameter        `json:"parameters"`
 	Locators    []LocatorCandidate `json:"locatorCandidates"`
 	Actions     []ActionBinding    `json:"actionBindings"`
@@ -127,16 +127,16 @@ type Parameter struct {
 	Description string              `json:"description,omitempty"`
 	Type        ValueType           `json:"type"`
 	Required    bool                `json:"required"`
-	Enum        []string            `json:"enum"`
+	Enum        []string            `json:"enum,omitempty"`
 	Items       *ParameterShape     `json:"items,omitempty"`
-	Properties  []ParameterProperty `json:"properties"`
+	Properties  []ParameterProperty `json:"properties,omitempty"`
 }
 
 type ParameterShape struct {
 	Type       ValueType           `json:"type"`
-	Enum       []string            `json:"enum"`
+	Enum       []string            `json:"enum,omitempty"`
 	Items      *ParameterShape     `json:"items,omitempty"`
-	Properties []ParameterProperty `json:"properties"`
+	Properties []ParameterProperty `json:"properties,omitempty"`
 }
 
 type ParameterProperty struct {

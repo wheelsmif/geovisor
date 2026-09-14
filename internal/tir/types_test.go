@@ -76,8 +76,69 @@ func TestNewDocumentMarshalsCollectionsAsArrays(t *testing.T) {
 		t.Fatal("parameters must not be empty")
 	}
 	parameter := jsonObject(t, parameters[0], "tools[0].parameters[0]")
+	if _, exists := parameter["enum"]; exists {
+		t.Fatal("empty parameter enum must be omitted")
+	}
+	if _, exists := parameter["properties"]; exists {
+		t.Fatal("empty parameter properties must be omitted")
+	}
+	if _, exists := tool["description"]; exists {
+		t.Fatal("empty tool description must be omitted")
+	}
+}
+
+func TestMarshalOmitsEmptyOptionalFieldsAndKeepsRequiredArrays(t *testing.T) {
+	t.Parallel()
+
+	document := NewDocument(SourceMetadata{
+		Kind:              SourceLaunchURL,
+		ExecutionBoundary: ExecutionAgentOwned,
+	})
+	document.Tools = append(document.Tools, Tool{
+		ID:   "search",
+		Name: "Search",
+		Parameters: []Parameter{{
+			Name:     "query",
+			Type:     ValueString,
+			Required: true,
+			Enum:     []string{"alpha", "beta"},
+		}},
+		Locators: []LocatorCandidate{{
+			ID: "query-input",
+			Semantic: &SemanticLocator{
+				Role: "searchbox",
+			},
+		}},
+		Actions: []ActionBinding{{
+			Action: ActionFill,
+			SideEffect: SideEffect{
+				Class:              SideEffectNone,
+				SafeForExploration: true,
+			},
+		}},
+	})
+	document.Normalize()
+
+	encoded, err := Marshal(document)
+	if err != nil {
+		t.Fatalf("marshal TIR: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("decode TIR: %v", err)
+	}
+	assertJSONArray(t, decoded, "tools")
+	assertJSONArray(t, decoded, "warnings")
+
+	tool := jsonObject(t, jsonArray(t, decoded["tools"], "tools")[0], "tools[0]")
+	parameter := jsonObject(t, jsonArray(t, tool["parameters"], "parameters")[0], "parameters[0]")
 	assertJSONArray(t, parameter, "enum")
-	assertJSONArray(t, parameter, "properties")
+	if _, exists := parameter["properties"]; exists {
+		t.Fatal("string parameter must not serialize empty properties")
+	}
+	if got := jsonArray(t, parameter["enum"], "enum"); len(got) != 2 {
+		t.Fatalf("enum = %#v, want two values", got)
+	}
 }
 
 func TestValidateRejectsUnsafeExploration(t *testing.T) {

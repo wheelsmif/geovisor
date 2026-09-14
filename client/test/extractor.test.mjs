@@ -718,6 +718,20 @@ test("safe exploration restores every observed details open state", async () => 
   assert.equal(details[1].open, false);
 });
 
+test("omits citation, DOI, RFC, and unnamed cite links", async () => {
+  const html = await readFile(resolve(repositoryRoot, "testdata", "corpus", "links.html"), "utf8");
+  const batch = await page(html).window.__GEOVISOR_EXTRACT__();
+  const actions = interactions(batch, "action");
+  assert.deepEqual(
+    Array.from(actions, (item) => item.name).sort(),
+    ["CSS", "HTML", "Save"],
+  );
+  assert.equal(
+    actions.some((item) => /^\[\d+\]$/u.test(item.name) || item.name.includes("10.1000") || item.name.startsWith("RFC")),
+    false,
+  );
+});
+
 test("matches the shared Go and Node observation fixture", async () => {
   const dom = page("<input aria-label='Query'>");
   const actual = JSON.parse(JSON.stringify(await dom.window.__GEOVISOR_EXTRACT__()));

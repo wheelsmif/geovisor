@@ -457,15 +457,26 @@ func TestWebMCPSiblingShadowHostsResolveDistinctly(t *testing.T) {
 	if report.ModuleError != "" {
 		t.Fatalf("module error: %s", report.ModuleError)
 	}
-	alpha := report.bySlug(t, "alpha")
-	beta := report.bySlug(t, "beta")
-	if alpha.Error != "" || beta.Error != "" {
-		t.Fatalf("shadow tools failed: %s %s", alpha.Error, beta.Error)
+	family := findDocumentToolByName(t, document, "Click")
+	if len(family.Locators) != 2 {
+		t.Fatalf("Click family locators = %d, want Alpha and Beta", len(family.Locators))
 	}
-	alphaResolved := alpha.resolved()
-	betaResolved := beta.resolved()
-	if len(alphaResolved) != 1 || len(betaResolved) != 1 || alphaResolved[0] == betaResolved[0] {
-		t.Fatalf("Alpha/Beta resolved to %v and %v", alphaResolved, betaResolved)
+	var outcomes []roundTripToolOutcome
+	for _, tool := range report.Tools {
+		if tool.Name == family.ID {
+			outcomes = append(outcomes, tool)
+		}
+	}
+	if len(outcomes) != 2 {
+		t.Fatalf("Click family executions = %d, want one per target; registered: %s", len(outcomes), strings.Join(report.toolNames(), ", "))
+	}
+	if outcomes[0].Error != "" || outcomes[1].Error != "" {
+		t.Fatalf("shadow family failed: %s %s", outcomes[0].Error, outcomes[1].Error)
+	}
+	first := outcomes[0].resolved()
+	second := outcomes[1].resolved()
+	if len(first) != 1 || len(second) != 1 || first[0] == second[0] {
+		t.Fatalf("Alpha/Beta resolved to %v and %v", first, second)
 	}
 	for _, tool := range document.Tools {
 		for _, locator := range tool.Locators {
@@ -478,6 +489,17 @@ func TestWebMCPSiblingShadowHostsResolveDistinctly(t *testing.T) {
 			}
 		}
 	}
+}
+
+func findDocumentToolByName(t *testing.T, document *tir.Document, name string) tir.Tool {
+	t.Helper()
+	for _, tool := range document.Tools {
+		if tool.Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("TIR tool %q not found", name)
+	return tir.Tool{}
 }
 
 func TestExtractCompileIDsStableWhenEarlierDuplicateNameInserted(t *testing.T) {

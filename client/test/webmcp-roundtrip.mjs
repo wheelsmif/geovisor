@@ -238,35 +238,36 @@ async function executeModule() {
 
   const tools = [];
   for (const registration of registrations) {
-    const before = snapshot(elements);
-    clicked.length = 0;
-    submitted.length = 0;
-    dispatched.length = 0;
-    inputEvents.length = 0;
-    const input = inputFor(registration.inputSchema);
-    let error = null;
-    try {
-      await registration.execute(input);
-    } catch (caught) {
-      error = messageOf(caught);
+    for (const input of inputsFor(registration.inputSchema)) {
+      const before = snapshot(elements);
+      clicked.length = 0;
+      submitted.length = 0;
+      dispatched.length = 0;
+      inputEvents.length = 0;
+      let error = null;
+      try {
+        await registration.execute(input);
+      } catch (caught) {
+        error = messageOf(caught);
+      }
+      const changed = diff(before, snapshot(elements));
+      const resolved = unique([...changed, ...clicked, ...dispatched]);
+      tools.push({
+        name: registration.name,
+        annotations: registration.annotations ?? null,
+        input,
+        error,
+        changed,
+        clicked: unique(clicked),
+        submitted: submitted.map((item) => ({ ...item })),
+        dispatched: unique(dispatched),
+        inputEvents: [...inputEvents],
+        // State is reported for every element the tool resolved to, not only the
+        // ones whose state changed, so an assertion can check the end state even
+        // when the requested state already held.
+        state: resolved.map((index) => ({ index, ...describe(elements[index]) })),
+      });
     }
-    const changed = diff(before, snapshot(elements));
-    const resolved = unique([...changed, ...clicked, ...dispatched]);
-    tools.push({
-      name: registration.name,
-      annotations: registration.annotations ?? null,
-      input,
-      error,
-      changed,
-      clicked: unique(clicked),
-      submitted: submitted.map((item) => ({ ...item })),
-      dispatched: unique(dispatched),
-      inputEvents: [...inputEvents],
-      // State is reported for every element the tool resolved to, not only the
-      // ones whose state changed, so an assertion can check the end state even
-      // when the requested state already held.
-      state: resolved.map((index) => ({ index, ...describe(elements[index]) })),
-    });
   }
 
   return {
@@ -344,6 +345,18 @@ function diff(before, after) {
     if (before[index] !== after[index]) changed.push(index);
   }
   return changed;
+}
+
+function inputsFor(schema) {
+  const target = schema?.properties?.target;
+  if (target && Array.isArray(target.enum) && target.enum.length > 0) {
+    return target.enum.map((value) => {
+      const input = inputFor(schema);
+      input.target = value;
+      return input;
+    });
+  }
+  return [inputFor(schema)];
 }
 
 function inputFor(schema) {

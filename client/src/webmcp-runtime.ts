@@ -82,8 +82,12 @@ async function executeTool(
       continue;
     }
     try {
-      const element = resolve(definition, binding);
-      const value = binding.inputParameter ? input[binding.inputParameter] : undefined;
+      const element = resolve(definition, binding, input);
+      const value = isFamilyTargetBinding(binding)
+        ? undefined
+        : binding.inputParameter
+          ? input[binding.inputParameter]
+          : undefined;
       apply(element, binding, value);
     } catch (error) {
       throw new Error(
@@ -108,9 +112,53 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   }
 }
 
-function resolve(definition: ToolDefinition, binding: ActionBinding): Element {
+function isFamilyTargetBinding(binding: ActionBinding): boolean {
+  return (
+    binding.inputParameter === "target" &&
+    (binding.action === "click" || binding.action === "check")
+  );
+}
+
+function familyLocatorName(locator: LocatorCandidate | undefined): string {
+  const name = locator?.semantic?.name;
+  if (typeof name === "string") {
+    const cleaned = name.replace(/\s+/gu, " ").trim();
+    if (cleaned) return cleaned;
+  }
+  return "Control";
+}
+
+function familyDisplayNames(
+  definition: ToolDefinition,
+  locatorIDs: string[],
+): Map<string, string> {
+  const counts = new Map<string, number>();
+  const names = new Map<string, string>();
+  for (const id of locatorIDs) {
+    const base = familyLocatorName(definition.locators.find((item) => item.id === id));
+    const next = (counts.get(base) ?? 0) + 1;
+    counts.set(base, next);
+    names.set(id, next === 1 ? base : `${base} (${next})`);
+  }
+  return names;
+}
+
+function resolve(
+  definition: ToolDefinition,
+  binding: ActionBinding,
+  input: Record<string, unknown>,
+): Element {
+  let locatorIDs = binding.locatorCandidateIds;
+  if (isFamilyTargetBinding(binding)) {
+    const target = String(input[binding.inputParameter ?? ""]);
+    const names = familyDisplayNames(definition, locatorIDs);
+    locatorIDs = locatorIDs.filter((id) => names.get(id) === target);
+    if (locatorIDs.length === 0) {
+      throw new Error("target does not match a locator");
+    }
+  }
   const failures: string[] = [];
-  for (const locatorID of binding.locatorCandidateIds) {
+  for (const locatorID of locatorIDs) {
     const candidate = definition.locators.find((item) => item.id === locatorID);
     if (!candidate) {
       failures.push(`${locatorID}: locator definition is missing`);
@@ -190,7 +238,7 @@ function apply(element: Element, binding: ActionBinding, value: unknown): void {
       applySelect(element, value);
       return;
     case "check":
-      applyCheck(element, binding, value);
+      applyCheck(element, value);
       return;
     default: {
       const unsupported: never = binding.action;
@@ -242,7 +290,7 @@ function applySelect(element: Element, value: unknown): void {
   notifyValueChange(element);
 }
 
-function applyCheck(element: Element, binding: ActionBinding, value: unknown): void {
+function applyCheck(element: Element, value: unknown): void {
   const input = element as HTMLInputElement;
   if (
     element.localName !== "input" ||
@@ -250,6 +298,6 @@ function applyCheck(element: Element, binding: ActionBinding, value: unknown): v
   ) {
     throw new Error("resolved element is not a checkbox or radio input");
   }
-  setNativeProperty(input, "checked", binding.inputParameter ? Boolean(value) : true);
+  setNativeProperty(input, "checked", value === undefined ? true : Boolean(value));
   notifyValueChange(element);
 }
