@@ -151,6 +151,11 @@ func TestFlattenCompleteFrameTreeNumbersChildrenInOrder(t *testing.T) {
 	if len(frames) != 4 {
 		t.Fatalf("discovered %d frames, want 4", len(frames))
 	}
+	for _, frame := range frames {
+		if frame.reason != "" {
+			t.Errorf("frame %s reason = %q, want empty when the pierce walk did not run", frame.frame.ID, frame.reason)
+		}
+	}
 	if path := got["root"]; len(path) != 0 {
 		t.Errorf("root path = %+v, want empty", path)
 	}
@@ -311,6 +316,99 @@ func TestCollectFrameOwnerOrderDeduplicatesAndDropsEmptyIDs(t *testing.T) {
 	}
 }
 
+func TestCollectFrameOwnerOrderUsesContentDocumentFrameID(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.DOMNode{
+		FrameID: "root",
+		Children: []*proto.DOMNode{{
+			LocalName: "iframe",
+			ContentDocument: &proto.DOMNode{
+				FrameID: "from-content",
+				Children: []*proto.DOMNode{
+					{LocalName: "iframe", FrameID: "inner"},
+				},
+			},
+		}},
+	}
+
+	got := map[proto.PageFrameID][]proto.PageFrameID{}
+	collectFrameOwnerOrder(got, root)
+	if !reflect.DeepEqual(got["root"], []proto.PageFrameID{"from-content"}) {
+		t.Fatalf("root children = %v, want [from-content]", got["root"])
+	}
+	if !reflect.DeepEqual(got["from-content"], []proto.PageFrameID{"inner"}) {
+		t.Fatalf("content-document children = %v, want [inner]", got["from-content"])
+	}
+}
+
+func TestCollectFrameOwnerOrderRecordsDocumentsWithNoFrames(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.DOMNode{
+		FrameID:  "root",
+		Children: []*proto.DOMNode{{LocalName: "body"}},
+	}
+	got := map[proto.PageFrameID][]proto.PageFrameID{}
+	collectFrameOwnerOrder(got, root)
+	children, walked := got["root"]
+	if !walked {
+		t.Fatal("walked document was not recorded")
+	}
+	if len(children) != 0 {
+		t.Fatalf("root children = %v, want none", children)
+	}
+}
+
+func TestCollectFrameOwnerOrderUsesFallbackWhenDocumentFrameIDEmpty(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.DOMNode{
+		Children: []*proto.DOMNode{
+			{LocalName: "iframe", FrameID: "oopif"},
+			{LocalName: "iframe", FrameID: "nested"},
+		},
+	}
+	got := map[proto.PageFrameID][]proto.PageFrameID{}
+	collectFrameOwnerOrderWithFallback(got, root, "page")
+	if !reflect.DeepEqual(got["page"], []proto.PageFrameID{"oopif", "nested"}) {
+		t.Fatalf("page children = %v, want [oopif nested]", got["page"])
+	}
+}
+
+func TestPierceIncompleteDetectsOmittedChildren(t *testing.T) {
+	t.Parallel()
+
+	if !pierceIncomplete(nil) {
+		t.Fatal("nil root should be incomplete")
+	}
+	count := 3
+	if !pierceIncomplete(&proto.DOMNode{ChildNodeCount: &count}) {
+		t.Fatal("childNodeCount without children should be incomplete")
+	}
+	if !pierceIncomplete(&proto.DOMNode{
+		Children: []*proto.DOMNode{{
+			LocalName: "html", ChildNodeCount: &count,
+		}},
+	}) {
+		t.Fatal("nested childNodeCount without children should be incomplete")
+	}
+	if pierceIncomplete(&proto.DOMNode{Children: []*proto.DOMNode{{LocalName: "html"}}}) {
+		t.Fatal("populated children should be complete")
+	}
+	if !pierceIncomplete(&proto.DOMNode{FrameID: "root"}) {
+		t.Fatal("document root with no children should be incomplete")
+	}
+	iframeCount := 2
+	if pierceIncomplete(&proto.DOMNode{
+		Children: []*proto.DOMNode{{
+			LocalName: "iframe", ChildNodeCount: &iframeCount,
+		}},
+	}) {
+		t.Fatal("omitted iframe fallback content should not mark the parent walk incomplete")
+	}
+}
+
 func TestMergeFrameOwnerOrderNilSessionLeavesMapUntouched(t *testing.T) {
 	t.Parallel()
 
@@ -377,7 +475,7 @@ func TestDiscoverOOPIFsRefetchesTargetsAfterParentAttach(t *testing.T) {
 		ChildFrames: []*proto.PageFrameTree{{Frame: &proto.PageFrame{ID: "parent"}}},
 	}
 
-	_, trees, diagnostics := discoverOOPIFs("page", root, list, attach)
+	_, trees, diagnostics := discoverOOPIFs("page", root, nil, list, attach)
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %+v", diagnostics)
 	}
@@ -398,6 +496,7 @@ func TestDiscoverOOPIFsReportsGetTargetsFailure(t *testing.T) {
 	_, _, diagnostics := discoverOOPIFs(
 		"page",
 		&proto.PageFrameTree{Frame: &proto.PageFrame{ID: "root"}},
+		nil,
 		func() ([]*proto.TargetTargetInfo, error) { return nil, errors.New("cdp closed") },
 		func(*proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error) {
 			t.Fatal("attach should not run when listing targets fails")
@@ -499,6 +598,100 @@ func TestDescendantIFrameFilterIgnoresForeignTargets(t *testing.T) {
 		TargetID: "child-oopif", Type: proto.TargetTargetInfoTypePage,
 	}) {
 		t.Fatal("page target was accepted as an iframe")
+	}
+	if !isDescendantIFrameTarget(allowed, "page", &proto.TargetTargetInfo{
+		TargetID: "missing-from-tree", Type: "iframe", OpenerFrameID: "root",
+	}) {
+		t.Fatal("iframe whose opener is an allowed frame was rejected")
+	}
+	if isDescendantIFrameTarget(allowed, "page", &proto.TargetTargetInfo{
+		TargetID: "other-tab-iframe", Type: "iframe", OpenerFrameID: "other-tab",
+	}) {
+		t.Fatal("iframe whose opener is a foreign frame was accepted")
+	}
+}
+
+func TestDiscoverOOPIFsAttachesTargetListedOnlyInOwnerOrder(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.PageFrameTree{Frame: &proto.PageFrame{ID: "root"}}
+	ownerOrder := map[proto.PageFrameID][]proto.PageFrameID{"root": {"oopif"}}
+	var attached []string
+	_, trees, diagnostics := discoverOOPIFs(
+		"page",
+		root,
+		ownerOrder,
+		func() ([]*proto.TargetTargetInfo, error) {
+			return []*proto.TargetTargetInfo{{
+				TargetID: "oopif", Type: "iframe", URL: "https://other.example/",
+			}}, nil
+		},
+		func(target *proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error) {
+			attached = append(attached, string(target.TargetID))
+			return &sessionClient{}, &proto.PageFrameTree{Frame: &proto.PageFrame{
+				ID: proto.PageFrameID(target.TargetID), ParentID: "root", URL: target.URL,
+			}}, nil
+		},
+	)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %+v", diagnostics)
+	}
+	if len(attached) != 1 || attached[0] != "oopif" {
+		t.Fatalf("attached = %v, want [oopif]", attached)
+	}
+	if trees["oopif"] == nil {
+		t.Fatal("owner-order OOPIF was not recorded")
+	}
+}
+
+func TestDiscoverOOPIFsParentsUnattachedTargetFromOwnerOrder(t *testing.T) {
+	t.Parallel()
+
+	root := &proto.PageFrameTree{Frame: &proto.PageFrame{ID: "root"}}
+	_, trees, _ := discoverOOPIFs(
+		"page",
+		root,
+		map[proto.PageFrameID][]proto.PageFrameID{"root": {"oopif"}},
+		func() ([]*proto.TargetTargetInfo, error) {
+			return []*proto.TargetTargetInfo{{
+				TargetID: "oopif", Type: "iframe", URL: "https://other.example/",
+			}}, nil
+		},
+		func(*proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error) {
+			return nil, nil, errors.New("attach refused")
+		},
+	)
+	tree := trees["oopif"]
+	if tree == nil || tree.Frame == nil || tree.Frame.ParentID != "root" {
+		t.Fatalf("unattached OOPIF parent = %+v, want root", tree)
+	}
+}
+
+func TestSeedOwnerOrderFramesAddsOmittedChild(t *testing.T) {
+	t.Parallel()
+
+	frames := map[proto.PageFrameID]*proto.PageFrame{"root": {ID: "root"}}
+	fallback := map[proto.PageFrameID][]proto.PageFrameID{}
+	seedOwnerOrderFrames(frames, fallback, map[proto.PageFrameID][]proto.PageFrameID{
+		"root": {"oopif"},
+	})
+	if frames["oopif"] == nil || frames["oopif"].ParentID != "root" {
+		t.Fatalf("seeded frame = %+v, want parent root", frames["oopif"])
+	}
+	if !reflect.DeepEqual(fallback["root"], []proto.PageFrameID{"oopif"}) {
+		t.Fatalf("fallback children = %v, want [oopif]", fallback["root"])
+	}
+}
+
+func TestParentFromOwnerOrderIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	got := parentFromOwnerOrder(map[proto.PageFrameID][]proto.PageFrameID{
+		"b": {"child"},
+		"a": {"child"},
+	}, "child")
+	if got != "a" {
+		t.Fatalf("parent = %q, want the lexicographically first match", got)
 	}
 }
 

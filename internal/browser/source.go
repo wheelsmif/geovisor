@@ -28,7 +28,7 @@ func (source *source) observeLaunch(parent context.Context) (Result, error) {
 	executable := source.launch.ExecutablePath
 	if executable == "" {
 		var found bool
-		executable, found = launcher.LookPath()
+		executable, found = LookPath()
 		if !found {
 			return Result{}, sanitizedError(
 				ErrorLaunch, "launch", "Chromium executable not found; set ExecutablePath", nil,
@@ -51,7 +51,7 @@ func (source *source) observeLaunch(parent context.Context) (Result, error) {
 	if source.launch.Headless != nil {
 		headless = *source.launch.Headless
 	}
-	process := newOwnedLauncher(ctx, executable, profile, headless)
+	process := newOwnedLauncher(ctx, executable, profile, headless, source.launch.hostResolverRules)
 	if source.launch.Stealth {
 		process.Delete("enable-automation").
 			Set("disable-blink-features", "AutomationControlled")
@@ -144,8 +144,9 @@ func newOwnedLauncher(
 	ctx context.Context,
 	executable, profile string,
 	headless bool,
+	resolverRules string,
 ) *launcher.Launcher {
-	return launcher.New().
+	process := launcher.New().
 		Context(ctx).
 		Logger(io.Discard).
 		Bin(executable).
@@ -155,6 +156,10 @@ func newOwnedLauncher(
 		Set("site-per-process").
 		Set("disable-features", "TranslateUI").
 		Delete("disable-site-isolation-trials")
+	if resolverRules != "" {
+		process.Set("host-resolver-rules", resolverRules)
+	}
+	return process
 }
 
 func cleanupOwnedBrowser(connection *browserConnection, process *launcher.Launcher) {

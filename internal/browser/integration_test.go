@@ -2,11 +2,14 @@ package browser
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,12 +23,10 @@ import (
 func TestLaunchObservesNestedShadowAndCrossOriginFrames(t *testing.T) {
 	executable := browserExecutable(t)
 
-	cross := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	crossURL := startCrossOriginServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "text/html")
 		_, _ = writer.Write(corpusFixture(t, "cross-frame.html"))
 	}))
-	defer cross.Close()
-	crossURL := strings.Replace(cross.URL, "127.0.0.1", "localhost", 1)
 
 	root := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/favicon.ico" {
@@ -44,6 +45,7 @@ func TestLaunchObservesNestedShadowAndCrossOriginFrames(t *testing.T) {
 
 	source, err := NewLaunch(LaunchOptions{
 		URL: root.URL, ExecutablePath: executable, Timeout: 45 * time.Second,
+		hostResolverRules: "MAP localhost 127.0.0.1",
 	})
 	if err != nil {
 		t.Fatalf("new launch source: %v", err)
@@ -265,9 +267,40 @@ func TestLaunchNumbersShadowHostedFrameBeforeLightSibling(t *testing.T) {
 	}
 }
 
+func startCrossOriginServer(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	// Chrome treats localhost and 127.0.0.1 as different sites, which is what
+	// forces an OOPIF. Binding only 127.0.0.1 and rewriting the URL to
+	// localhost fails when Chrome prefers ::1. Serve both loopback families
+	// and pin localhost to IPv4 in the launched browser.
+	ipv4, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on 127.0.0.1 for the cross-origin fixture: %v", err)
+	}
+	port := ipv4.Addr().(*net.TCPAddr).Port
+	server := &http.Server{Handler: handler}
+	go func() { _ = server.Serve(ipv4) }()
+	ipv6, ipv6Err := net.Listen("tcp6", net.JoinHostPort("::1", strconv.Itoa(port)))
+	if ipv6Err == nil {
+		go func() { _ = server.Serve(ipv6) }()
+	} else {
+		t.Logf("IPv6 loopback listen failed: %v", ipv6Err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+		_ = ipv4.Close()
+		if ipv6 != nil {
+			_ = ipv6.Close()
+		}
+	})
+	return fmt.Sprintf("http://localhost:%d", port)
+}
+
 func browserExecutable(t *testing.T) string {
 	t.Helper()
-	executable, found := launcher.LookPath()
+	executable, found := LookPath()
 	if found {
 		return executable
 	}

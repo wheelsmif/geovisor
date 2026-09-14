@@ -13,7 +13,7 @@ import (
 
 func TestOwnedLauncherDisablesLeaklessAndPreservesIsolation(t *testing.T) {
 	t.Parallel()
-	instance := newOwnedLauncher(context.Background(), "chromium", t.TempDir(), true)
+	instance := newOwnedLauncher(context.Background(), "chromium", t.TempDir(), true, "")
 	if instance.Has(flags.Leakless) {
 		t.Fatal("owned launcher must explicitly disable leakless")
 	}
@@ -26,6 +26,15 @@ func TestOwnedLauncherDisablesLeaklessAndPreservesIsolation(t *testing.T) {
 	}
 	if instance.Has("disable-site-isolation-trials") {
 		t.Fatal("owned launcher must not disable site isolation trials")
+	}
+}
+
+func TestOwnedLauncherSetsHostResolverRulesWhenProvided(t *testing.T) {
+	t.Parallel()
+	instance := newOwnedLauncher(context.Background(), "chromium", t.TempDir(), true, "MAP localhost 127.0.0.1")
+	got, ok := instance.GetFlags("host-resolver-rules")
+	if !ok || len(got) != 1 || got[0] != "MAP localhost 127.0.0.1" {
+		t.Fatalf("host-resolver-rules = %v ok=%v, want MAP localhost 127.0.0.1", got, ok)
 	}
 }
 

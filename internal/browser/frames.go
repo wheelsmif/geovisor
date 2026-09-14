@@ -91,8 +91,15 @@ func observeTarget(
 	if err != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
 		return result, operationError(ctx, ErrorFrameDiscovery, "frames.tree", "read browser frame tree", err)
 	}
+	waitForMissingOOPIFs(ctx, browser, rootSession, tree.FrameTree, options.quietTimeout)
+	tree, err = (proto.PageGetFrameTree{}).Call(rootSession)
+	if err != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
+		return result, operationError(ctx, ErrorFrameDiscovery, "frames.tree", "read browser frame tree", err)
+	}
 
-	oopifSessions, oopifTrees, oopifDiagnostics, detach := attachOOPIFSessions(ctx, browser, targetID, tree.FrameTree)
+	oopifSessions, oopifTrees, oopifDiagnostics, detach := attachOOPIFSessions(
+		ctx, browser, targetID, rootSession, tree.FrameTree,
+	)
 	defer detach()
 	result.Diagnostics = append(result.Diagnostics, oopifDiagnostics...)
 	frames := flattenCompleteFrameTree(tree.FrameTree, rootSession, oopifSessions, oopifTrees)
@@ -143,6 +150,75 @@ func observeTarget(
 		Batches: []observation.Batch{batch},
 	}
 	return result, nil
+}
+
+func waitForMissingOOPIFs(
+	ctx context.Context,
+	browser *rod.Browser,
+	session *sessionClient,
+	tree *proto.PageFrameTree,
+	limit time.Duration,
+) {
+	expected := countFrameElements(piercedDocument(session))
+	have := 0
+	if tree != nil {
+		have = len(tree.ChildFrames)
+	}
+	if expected <= have {
+		return
+	}
+	waitForIFrameTargets(ctx, browser, limit)
+}
+
+func countFrameElements(node *proto.DOMNode) int {
+	if node == nil {
+		return 0
+	}
+	localName := strings.ToLower(node.LocalName)
+	if localName == "iframe" || localName == "frame" {
+		return 1
+	}
+	total := 0
+	for _, child := range node.Children {
+		total += countFrameElements(child)
+	}
+	for _, shadow := range node.ShadowRoots {
+		if shadow == nil || shadow.ShadowRootType == proto.DOMShadowRootTypeClosed {
+			continue
+		}
+		total += countFrameElements(shadow)
+	}
+	return total
+}
+
+func waitForIFrameTargets(ctx context.Context, browser *rod.Browser, limit time.Duration) {
+	if browser == nil {
+		return
+	}
+	if limit <= 0 {
+		limit = DefaultDOMQuietLimit
+	}
+	deadline := time.Now().Add(limit)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		targets, err := (proto.TargetGetTargets{}).Call(browser.Context(ctx))
+		if err == nil {
+			for _, target := range targets.TargetInfos {
+				if target != nil && string(target.Type) == "iframe" {
+					return
+				}
+			}
+		}
+		if !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func sessionMainFrameID(session *sessionClient) (proto.PageFrameID, error) {
@@ -268,6 +344,7 @@ func attachOOPIFSessions(
 	ctx context.Context,
 	browser *rod.Browser,
 	rootTargetID proto.TargetTargetID,
+	rootSession *sessionClient,
 	rootTree *proto.PageFrameTree,
 ) (
 	map[proto.PageFrameID]*sessionClient,
@@ -275,10 +352,13 @@ func attachOOPIFSessions(
 	[]Diagnostic,
 	func(),
 ) {
+	ownerOrder := make(map[proto.PageFrameID][]proto.PageFrameID)
+	mergeFrameOwnerOrder(ownerOrder, rootSession)
 	var attached []*sessionClient
 	sessions, trees, diagnostics := discoverOOPIFs(
 		rootTargetID,
 		rootTree,
+		ownerOrder,
 		func() ([]*proto.TargetTargetInfo, error) {
 			targets, err := (proto.TargetGetTargets{}).Call(browser.Context(ctx))
 			if err != nil {
@@ -293,6 +373,7 @@ func attachOOPIFSessions(
 			if attachErr != nil {
 				return nil, nil, attachErr
 			}
+			_ = (proto.PageEnable{}).Call(session)
 			tree, treeErr := (proto.PageGetFrameTree{}).Call(session)
 			session.ctx = ctx
 			if treeErr != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
@@ -319,6 +400,7 @@ func attachOOPIFSessions(
 func discoverOOPIFs(
 	rootTargetID proto.TargetTargetID,
 	rootTree *proto.PageFrameTree,
+	ownerOrder map[proto.PageFrameID][]proto.PageFrameID,
 	listTargets func() ([]*proto.TargetTargetInfo, error),
 	attach func(*proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error),
 ) (
@@ -329,7 +411,7 @@ func discoverOOPIFs(
 	result := make(map[proto.PageFrameID]*sessionClient)
 	trees := make(map[proto.PageFrameID]*proto.PageFrameTree)
 	var diagnostics []Diagnostic
-	allowed := descendantFrameIDs(rootTree)
+	allowed := unionFrameIDs(rootTree, ownerOrder)
 	seen := make(map[proto.TargetTargetID]struct{})
 	for progress := true; progress; {
 		progress = false
@@ -359,7 +441,9 @@ func discoverOOPIFs(
 			progress = true
 			session, tree, attachErr := attach(target)
 			if attachErr != nil || tree == nil || tree.Frame == nil {
-				addUnattachedOOPIF(trees, target, parentFrameID(rootTree, trees, proto.PageFrameID(target.TargetID)))
+				addUnattachedOOPIF(trees, target, parentFrameID(
+					rootTree, trees, ownerOrder, proto.PageFrameID(target.TargetID),
+				))
 				continue
 			}
 			result[tree.Frame.ID] = session
@@ -370,6 +454,24 @@ func discoverOOPIFs(
 		}
 	}
 	return result, trees, diagnostics
+}
+
+func unionFrameIDs(
+	tree *proto.PageFrameTree,
+	ownerOrder map[proto.PageFrameID][]proto.PageFrameID,
+) map[proto.PageFrameID]struct{} {
+	allowed := descendantFrameIDs(tree)
+	for parent, children := range ownerOrder {
+		if parent != "" {
+			allowed[parent] = struct{}{}
+		}
+		for _, child := range children {
+			if child != "" {
+				allowed[child] = struct{}{}
+			}
+		}
+	}
+	return allowed
 }
 
 func descendantFrameIDs(tree *proto.PageFrameTree) map[proto.PageFrameID]struct{} {
@@ -396,8 +498,16 @@ func isDescendantIFrameTarget(
 	if target == nil || string(target.Type) != "iframe" || target.TargetID == rootTargetID {
 		return false
 	}
-	_, ok := allowed[proto.PageFrameID(target.TargetID)]
-	return ok
+	if _, ok := allowed[proto.PageFrameID(target.TargetID)]; ok {
+		return true
+	}
+	// Page.getFrameTree omits some OOPIFs until attach. The pierce walk and
+	// openerFrameId still identify those targets as descendants of this page.
+	if target.OpenerFrameID != "" {
+		_, ok := allowed[target.OpenerFrameID]
+		return ok
+	}
+	return false
 }
 
 func addUnattachedOOPIF(
@@ -417,6 +527,7 @@ func addUnattachedOOPIF(
 func parentFrameID(
 	root *proto.PageFrameTree,
 	extra map[proto.PageFrameID]*proto.PageFrameTree,
+	ownerOrder map[proto.PageFrameID][]proto.PageFrameID,
 	child proto.PageFrameID,
 ) proto.PageFrameID {
 	if found := findParentFrameID(root, child); found != "" {
@@ -432,7 +543,29 @@ func parentFrameID(
 			return found
 		}
 	}
-	return ""
+	return parentFromOwnerOrder(ownerOrder, child)
+}
+
+func parentFromOwnerOrder(
+	ownerOrder map[proto.PageFrameID][]proto.PageFrameID,
+	child proto.PageFrameID,
+) proto.PageFrameID {
+	if child == "" {
+		return ""
+	}
+	var matches []proto.PageFrameID
+	for parent, children := range ownerOrder {
+		for _, id := range children {
+			if id == child {
+				matches = append(matches, parent)
+			}
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i] < matches[j] })
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[0]
 }
 
 func findParentFrameID(node *proto.PageFrameTree, child proto.PageFrameID) proto.PageFrameID {
@@ -491,6 +624,7 @@ func flattenCompleteFrameTree(
 	for _, frameID := range oopifIDs {
 		mergeFrameOwnerOrder(ownerOrder, oopifSessions[frameID])
 	}
+	seedOwnerOrderFrames(frames, fallbackChildren, ownerOrder)
 
 	result := make([]discoveredFrame, 0, len(frames))
 	visited := make(map[proto.PageFrameID]bool)
@@ -509,7 +643,8 @@ func flattenCompleteFrameTree(
 			frame: frame, path: cloneFramePath(path), session: session, reason: reason,
 		})
 
-		ordered := append([]proto.PageFrameID{}, ownerOrder[frameID]...)
+		ordered, walked := ownerOrder[frameID]
+		ordered = append([]proto.PageFrameID{}, ordered...)
 		seen := make(map[proto.PageFrameID]bool, len(ordered))
 		for _, childID := range ordered {
 			seen[childID] = true
@@ -534,6 +669,14 @@ func flattenCompleteFrameTree(
 			}
 			return extras[i] < extras[j]
 		})
+		if !walked {
+			// The pierce walk never ran for this document (no session, DOM.getDocument
+			// failed, or the snapshot omitted children). Falling through to "every
+			// CDP child is closed-shadow" is what made CI mark live light-DOM frames
+			// uncovered and skip extraction.
+			ordered = append(ordered, extras...)
+			extras = nil
+		}
 		ownerCount := len(ordered)
 		ordered = append(ordered, extras...)
 		for index, childID := range ordered {
@@ -545,7 +688,7 @@ func flattenCompleteFrameTree(
 				Index: index, Name: child.Name, Src: pageurl.PageURL(child.URL),
 			})
 			childReason := reason
-			if index >= ownerCount && childReason == "" {
+			if walked && index >= ownerCount && childReason == "" {
 				childReason = "frame is not visible to page JavaScript (closed shadow or equivalent)"
 			}
 			visit(childID, childPath, session, childReason)
@@ -555,6 +698,38 @@ func flattenCompleteFrameTree(
 	return result
 }
 
+func seedOwnerOrderFrames(
+	frames map[proto.PageFrameID]*proto.PageFrame,
+	fallbackChildren map[proto.PageFrameID][]proto.PageFrameID,
+	ownerOrder map[proto.PageFrameID][]proto.PageFrameID,
+) {
+	parents := make([]proto.PageFrameID, 0, len(ownerOrder))
+	for parentID := range ownerOrder {
+		parents = append(parents, parentID)
+	}
+	sort.Slice(parents, func(i, j int) bool { return parents[i] < parents[j] })
+	for _, parentID := range parents {
+		for _, childID := range ownerOrder[parentID] {
+			if childID == "" {
+				continue
+			}
+			if frames[childID] == nil {
+				frames[childID] = &proto.PageFrame{ID: childID, ParentID: parentID}
+			}
+			found := false
+			for _, existing := range fallbackChildren[parentID] {
+				if existing == childID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				fallbackChildren[parentID] = append(fallbackChildren[parentID], childID)
+			}
+		}
+	}
+}
+
 func mergeFrameOwnerOrder(
 	target map[proto.PageFrameID][]proto.PageFrameID,
 	session *sessionClient,
@@ -562,12 +737,49 @@ func mergeFrameOwnerOrder(
 	if session == nil {
 		return
 	}
-	depth := -1
-	document, err := (proto.DOMGetDocument{Depth: &depth, Pierce: true}).Call(session)
-	if err != nil || document.Root == nil {
+	document := piercedDocument(session)
+	if document == nil {
 		return
 	}
-	collectFrameOwnerOrder(target, document.Root)
+	fallback := document.FrameID
+	if fallback == "" {
+		fallback, _ = sessionMainFrameID(session)
+	}
+	collectFrameOwnerOrderWithFallback(target, document, fallback)
+}
+
+func pierceIncomplete(root *proto.DOMNode) bool {
+	if root == nil {
+		return true
+	}
+	if len(root.Children) == 0 && len(root.ShadowRoots) == 0 {
+		return true
+	}
+	var missing func(*proto.DOMNode) bool
+	missing = func(node *proto.DOMNode) bool {
+		if node == nil {
+			return false
+		}
+		localName := strings.ToLower(node.LocalName)
+		if localName == "iframe" || localName == "frame" {
+			return false
+		}
+		if node.ChildNodeCount != nil && *node.ChildNodeCount > 0 && len(node.Children) == 0 {
+			return true
+		}
+		for _, child := range node.Children {
+			if missing(child) {
+				return true
+			}
+		}
+		for _, shadow := range node.ShadowRoots {
+			if missing(shadow) {
+				return true
+			}
+		}
+		return false
+	}
+	return missing(root)
 }
 
 // collectFrameOwnerOrder walks a pierced DOM tree and records each document's
@@ -585,6 +797,20 @@ func collectFrameOwnerOrder(target map[proto.PageFrameID][]proto.PageFrameID, ro
 	if root == nil {
 		return
 	}
+	collectFrameOwnerOrderWithFallback(target, root, root.FrameID)
+}
+
+func collectFrameOwnerOrderWithFallback(
+	target map[proto.PageFrameID][]proto.PageFrameID,
+	root *proto.DOMNode,
+	fallback proto.PageFrameID,
+) {
+	if root == nil {
+		return
+	}
+	if fallback == "" {
+		fallback = root.FrameID
+	}
 	var walkDocument func(*proto.DOMNode, proto.PageFrameID)
 	var walkContent func(*proto.DOMNode, proto.PageFrameID)
 	walkDocument = func(node *proto.DOMNode, fallback proto.PageFrameID) {
@@ -595,6 +821,11 @@ func collectFrameOwnerOrder(target map[proto.PageFrameID][]proto.PageFrameID, ro
 		if frameID == "" {
 			frameID = fallback
 		}
+		if frameID != "" {
+			if _, exists := target[frameID]; !exists {
+				target[frameID] = []proto.PageFrameID{}
+			}
+		}
 		walkContent(node, frameID)
 	}
 	walkContent = func(node *proto.DOMNode, documentFrameID proto.PageFrameID) {
@@ -602,10 +833,13 @@ func collectFrameOwnerOrder(target map[proto.PageFrameID][]proto.PageFrameID, ro
 			return
 		}
 		localName := strings.ToLower(node.LocalName)
-		if (localName == "iframe" || localName == "frame") && node.FrameID != "" {
-			target[documentFrameID] = append(target[documentFrameID], node.FrameID)
+		if localName == "iframe" || localName == "frame" {
+			childID := frameOwnerID(node)
+			if childID != "" && documentFrameID != "" {
+				target[documentFrameID] = append(target[documentFrameID], childID)
+			}
 			if node.ContentDocument != nil {
-				walkDocument(node.ContentDocument, node.FrameID)
+				walkDocument(node.ContentDocument, childID)
 			}
 			return
 		}
@@ -622,10 +856,23 @@ func collectFrameOwnerOrder(target map[proto.PageFrameID][]proto.PageFrameID, ro
 			walkDocument(node.ContentDocument, node.FrameID)
 		}
 	}
-	walkDocument(root, root.FrameID)
+	walkDocument(root, fallback)
 	for parentID, children := range target {
 		target[parentID] = stableUniqueFrameIDs(children)
 	}
+}
+
+func frameOwnerID(node *proto.DOMNode) proto.PageFrameID {
+	if node == nil {
+		return ""
+	}
+	if node.FrameID != "" {
+		return node.FrameID
+	}
+	if node.ContentDocument != nil {
+		return node.ContentDocument.FrameID
+	}
+	return ""
 }
 
 func stableUniqueFrameIDs(source []proto.PageFrameID) []proto.PageFrameID {
@@ -765,12 +1012,27 @@ func closedShadowWarnings(
 	session *sessionClient,
 	frameID proto.PageFrameID,
 ) []observation.Warning {
-	depth := -1
-	document, err := (proto.DOMGetDocument{Depth: &depth, Pierce: true}).Call(session)
-	if err != nil || document.Root == nil {
+	document := piercedDocument(session)
+	if document == nil {
 		return nil
 	}
-	return collectClosedShadows(document.Root, frameID)
+	return collectClosedShadows(document, frameID)
+}
+
+func piercedDocument(session *sessionClient) *proto.DOMNode {
+	if session == nil {
+		return nil
+	}
+	// Newer Chromium builds return a root with no children unless the DOM
+	// domain is enabled first. Without that snapshot, every CDP child was
+	// treated as closed-shadow and skipped.
+	_ = (proto.DOMEnable{}).Call(session)
+	depth := -1
+	document, err := (proto.DOMGetDocument{Depth: &depth, Pierce: true}).Call(session)
+	if err != nil || document == nil || pierceIncomplete(document.Root) {
+		return nil
+	}
+	return document.Root
 }
 
 func collectClosedShadows(root *proto.DOMNode, documentFrameID proto.PageFrameID) []observation.Warning {

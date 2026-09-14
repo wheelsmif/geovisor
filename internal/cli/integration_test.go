@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-rod/rod/lib/launcher"
+	"github.com/wheelsmif/geovisor/internal/browser"
 )
 
 func TestLaunchSmoke(t *testing.T) {
-	executable, found := launcher.LookPath()
+	executable, found := browser.LookPath()
 	if !found {
 		if os.Getenv("GEOVISOR_REQUIRE_BROWSER") == "1" {
 			t.Fatal("GEOVISOR_REQUIRE_BROWSER=1 but no Chromium executable was found")

@@ -112,6 +112,10 @@ type LaunchOptions struct {
 	FrameTimeout    time.Duration
 	Stealth         bool
 	Extraction      ExtractionOptions
+	// hostResolverRules is a Chromium MAP rule used by tests so a localhost
+	// iframe URL reaches a server bound to 127.0.0.1 without collapsing the
+	// two names into one origin.
+	hostResolverRules string
 }
 
 // AttachOptions configure observation of an existing Chromium CDP endpoint.
