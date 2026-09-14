@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/wheelsmif/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/pageurl"
 	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
@@ -122,8 +122,8 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 	document := tir.NewDocument(tir.SourceMetadata{
 		Kind:              tir.SourceKind(input.Source.Kind),
 		ExecutionBoundary: tir.ExecutionAgentOwned,
-		RequestedURL:      pageURL(input.Source.RequestedURL),
-		FinalURL:          pageURL(input.Source.FinalURL),
+		RequestedURL:      pageurl.PageURL(input.Source.RequestedURL),
+		FinalURL:          pageurl.PageURL(input.Source.FinalURL),
 		StealthEnabled:    input.Source.StealthEnabled,
 	})
 
@@ -151,7 +151,7 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 			}
 			if frame.Accessible {
 				accumulator.accessible = true
-				accumulator.urls = appendNonempty(accumulator.urls, pageURL(frame.URL))
+				accumulator.urls = appendNonempty(accumulator.urls, pageurl.PageURL(frame.URL))
 				accumulator.origins = appendNonempty(accumulator.origins, cleanText(frame.Origin))
 			} else {
 				accumulator.inaccessible = true
@@ -319,8 +319,11 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 				Message: "parameter name must not be empty",
 			}
 		}
-		data, _ := json.Marshal(compiled)
-		prepared := preparedParameter{name: compiled.Name, value: compiled, key: string(data)}
+		key, err := marshalIdentity(fmt.Sprintf("%s.parameters[%d]", field, i), compiled)
+		if err != nil {
+			return result, nil, err
+		}
+		prepared := preparedParameter{name: compiled.Name, value: compiled, key: key}
 		if parameter.SourceOrder != nil {
 			prepared.order = *parameter.SourceOrder
 			prepared.hasOrder = true
@@ -335,15 +338,22 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 		if err != nil {
 			return result, nil, err
 		}
-		data, _ := json.Marshal(struct {
+		locatorField := fmt.Sprintf("%s.locators[%d]", field, i)
+		key, err := marshalIdentity(locatorField, struct {
 			FramePath  []tir.PathNode
 			ShadowPath []tir.PathNode
 			Semantic   *tir.SemanticLocator
 			CSS        string
 		}{compiled.FramePath, compiled.ShadowPath, compiled.Semantic, compiled.CSSFallback})
-		key := string(data)
+		if err != nil {
+			return result, nil, err
+		}
+		identityKey, err := locatorIdentityKey(locatorField, compiled)
+		if err != nil {
+			return result, nil, err
+		}
 		locatorKeys[i] = key
-		identityLocatorKeys[i] = locatorIdentityKey(compiled)
+		identityLocatorKeys[i] = identityKey
 		result.locators = append(result.locators, preparedLocator{key: key, value: compiled, evidence: evidence})
 		if compiled.Semantic == nil && compiled.CSSFallback != "" {
 			warnings = append(warnings, pendingWarning{
@@ -664,27 +674,17 @@ func compileWarnings(source []pendingWarning, toolIDs map[string]string) []tir.W
 }
 
 func compileParameter(field string, source observation.Parameter) (tir.Parameter, error) {
-	if err := validateValueType(field+".type", source.Type); err != nil {
-		return tir.Parameter{}, err
-	}
-	result := tir.Parameter{
-		Name: cleanText(source.Name), Description: cleanText(source.Description),
-		Type: tir.ValueType(source.Type), Required: source.Required,
-		Enum: sortedUniqueStrings(cleanStrings(source.Enum)),
-	}
-	if source.Items != nil {
-		items, err := compileShape(field+".items", *source.Items)
-		if err != nil {
-			return tir.Parameter{}, err
-		}
-		result.Items = &items
-	}
-	properties, err := compileProperties(field+".properties", source.Properties)
+	shape, err := compileShape(field, observation.ParameterShape{
+		Type: source.Type, Enum: source.Enum, Items: source.Items, Properties: source.Properties,
+	})
 	if err != nil {
 		return tir.Parameter{}, err
 	}
-	result.Properties = properties
-	return result, nil
+	return tir.Parameter{
+		Name: cleanText(source.Name), Description: cleanText(source.Description),
+		Type: shape.Type, Required: source.Required,
+		Enum: shape.Enum, Items: shape.Items, Properties: shape.Properties,
+	}, nil
 }
 
 func compileShape(field string, source observation.ParameterShape) (tir.ParameterShape, error) {
@@ -806,31 +806,28 @@ func compilePathNodes(field string, source []observation.PathNode) ([]tir.PathNo
 }
 
 func compileTIRSemanticNodes(field string, source []observation.SemanticNode) ([]tir.SemanticNode, error) {
-	result := make([]tir.SemanticNode, len(source))
-	for i, node := range source {
-		if err := rejectNegativeNth(fmt.Sprintf("%s[%d].nth", field, i), node.Nth); err != nil {
-			return nil, err
-		}
-		result[i] = tir.SemanticNode{
-			Role: canonicalText(node.Role),
-			Name: cleanText(node.Name),
-			Nth:  node.Nth,
-		}
-	}
-	return result, nil
+	return compileSemanticNodes(field, source, func(role, name string, nth int) tir.SemanticNode {
+		return tir.SemanticNode{Role: role, Name: name, Nth: nth}
+	})
 }
 
 func compileObservationSemanticNodes(field string, source []observation.SemanticNode) ([]observation.SemanticNode, error) {
-	result := make([]observation.SemanticNode, len(source))
+	return compileSemanticNodes(field, source, func(role, name string, nth int) observation.SemanticNode {
+		return observation.SemanticNode{Role: role, Name: name, Nth: nth}
+	})
+}
+
+func compileSemanticNodes[T any](
+	field string,
+	source []observation.SemanticNode,
+	to func(role, name string, nth int) T,
+) ([]T, error) {
+	result := make([]T, len(source))
 	for i, node := range source {
 		if err := rejectNegativeNth(fmt.Sprintf("%s[%d].nth", field, i), node.Nth); err != nil {
 			return nil, err
 		}
-		result[i] = observation.SemanticNode{
-			Role: canonicalText(node.Role),
-			Name: cleanText(node.Name),
-			Nth:  node.Nth,
-		}
+		result[i] = to(canonicalText(node.Role), cleanText(node.Name), node.Nth)
 	}
 	return result, nil
 }
@@ -1002,13 +999,24 @@ func actionOutputKey(action tir.ActionBinding) string {
 		strings.Join(action.LocatorCandidateIDs, "\x1e"), string(action.SideEffect.Class))
 }
 
-func locatorIdentityKey(locator tir.LocatorCandidate) string {
-	data, _ := json.Marshal(struct {
+func locatorIdentityKey(field string, locator tir.LocatorCandidate) (string, error) {
+	return marshalIdentity(field, struct {
 		FramePath  []tir.PathNode
 		ShadowPath []tir.PathNode
 		Semantic   *tir.SemanticLocator
 	}{locator.FramePath, locator.ShadowPath, locator.Semantic})
-	return string(data)
+}
+
+func marshalIdentity(field string, value any) (string, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", &Error{
+			Field: field, Code: "marshal_failed",
+			Message: "could not build a deterministic identity key",
+			err:     err,
+		}
+	}
+	return string(data), nil
 }
 
 func locatorSlug(locator tir.LocatorCandidate) string {
@@ -1030,17 +1038,22 @@ func semanticNodesKey(nodes []observation.SemanticNode) string {
 }
 
 func observationFramePathKey(path []observation.FrameReference) string {
-	parts := make([]string, 0, len(path)*3)
-	for _, frame := range path {
-		parts = append(parts, strconv.Itoa(frame.Index), frame.Name, frame.Src)
-	}
-	return joinedKey(parts...)
+	return joinedFramePathKey(path, func(frame observation.FrameReference) (int, string, string) {
+		return frame.Index, frame.Name, frame.Src
+	})
 }
 
 func tirFramePathKey(path []tir.FrameReference) string {
+	return joinedFramePathKey(path, func(frame tir.FrameReference) (int, string, string) {
+		return frame.Index, frame.Name, frame.Src
+	})
+}
+
+func joinedFramePathKey[T any](path []T, part func(T) (index int, name, src string)) string {
 	parts := make([]string, 0, len(path)*3)
-	for _, frame := range path {
-		parts = append(parts, strconv.Itoa(frame.Index), frame.Name, frame.Src)
+	for _, item := range path {
+		index, name, src := part(item)
+		parts = append(parts, strconv.Itoa(index), name, src)
 	}
 	return joinedKey(parts...)
 }
@@ -1057,7 +1070,7 @@ func normalizeFrameReferences(path []observation.FrameReference) []observation.F
 	result := make([]observation.FrameReference, len(path))
 	for i, frame := range path {
 		result[i] = observation.FrameReference{
-			Index: frame.Index, Name: cleanText(frame.Name), Src: pageURL(frame.Src),
+			Index: frame.Index, Name: cleanText(frame.Name), Src: pageurl.PageURL(frame.Src),
 		}
 	}
 	return result
@@ -1181,24 +1194,6 @@ func cleanStrings(values []string) []string {
 
 func cleanText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
-}
-
-func pageURL(raw string) string {
-	trimmed := cleanText(raw)
-	if trimmed == "" {
-		return ""
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return trimmed
-	}
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
-	if parsed.Host == "" {
-		return parsed.String()
-	}
-	return parsed.Scheme + "://" + parsed.Host + parsed.EscapedPath()
 }
 
 func canonicalText(value string) string {

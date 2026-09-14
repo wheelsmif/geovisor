@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/wheelsmif/geovisor/internal/compiler"
 	"github.com/wheelsmif/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/pageurl"
 	"github.com/wheelsmif/geovisor/internal/payload"
 )
 
@@ -107,7 +107,7 @@ func observeTarget(
 		fact := observation.Frame{
 			Path:       cloneFramePath(frame.path),
 			Accessible: true,
-			URL:        pageURL(frame.frame.URL),
+			URL:        pageurl.PageURL(frame.frame.URL),
 			Origin:     frame.frame.SecurityOrigin,
 		}
 		extracted, code, reason := extractFrame(frame, options.extraction, options.frameTimeout)
@@ -287,7 +287,7 @@ func attachOOPIFSessions(
 			return targets.TargetInfos, nil
 		},
 		func(target *proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error) {
-			attachContext, cancel := context.WithTimeout(ctx, defaultDOMQuietLimit)
+			attachContext, cancel := context.WithTimeout(ctx, DefaultDOMQuietLimit)
 			defer cancel()
 			session, attachErr := attachTarget(attachContext, browser, target.TargetID)
 			if attachErr != nil {
@@ -410,7 +410,7 @@ func addUnattachedOOPIF(
 		parentID = target.OpenerFrameID
 	}
 	trees[frameID] = &proto.PageFrameTree{Frame: &proto.PageFrame{
-		ID: frameID, ParentID: parentID, URL: target.URL, SecurityOrigin: originForURL(target.URL),
+		ID: frameID, ParentID: parentID, URL: target.URL, SecurityOrigin: pageurl.Origin(target.URL),
 	}}
 }
 
@@ -448,38 +448,6 @@ func findParentFrameID(node *proto.PageFrameTree, child proto.PageFrameID) proto
 		}
 	}
 	return ""
-}
-
-func originForURL(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return ""
-	}
-	return parsed.Scheme + "://" + parsed.Host
-}
-
-// pageURL keeps scheme, host, and path and drops query and fragment so tokens
-// in iframe src and source URLs cannot enter TIR (P12).
-func pageURL(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return trimmed
-	}
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
-	if parsed.Host == "" {
-		return parsed.String()
-	}
-	path := parsed.EscapedPath()
-	if path == "" && parsed.Scheme != "" {
-		path = ""
-	}
-	return parsed.Scheme + "://" + parsed.Host + path
 }
 
 func flattenCompleteFrameTree(
@@ -574,7 +542,7 @@ func flattenCompleteFrameTree(
 				continue
 			}
 			childPath := append(cloneFramePath(path), observation.FrameReference{
-				Index: index, Name: child.Name, Src: pageURL(child.URL),
+				Index: index, Name: child.Name, Src: pageurl.PageURL(child.URL),
 			})
 			childReason := reason
 			if index >= ownerCount && childReason == "" {

@@ -17,6 +17,8 @@ import { pathToFileURL } from "node:url";
 
 import { JSDOM, VirtualConsole } from "jsdom";
 
+import { isFrame, messageOf, repositoryRoot, upgradeDeclarativeShadows, visitTree } from "./helpers.mjs";
+
 const FIXTURE_URL = "https://roundtrip.example/";
 const STRING_INPUT = "GV-ROUNDTRIP";
 
@@ -31,7 +33,6 @@ if (mode === "execute" && !modulePath) {
   throw new Error("execute mode requires the emitted module path");
 }
 
-const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const html = await readFile(resolve(repositoryRoot, fixturePath), "utf8");
 
 function buildDOM() {
@@ -48,44 +49,6 @@ function buildDOM() {
   upgradeDeclarativeShadows(dom.window.document);
   populateSrcdocFrames(dom.window.document);
   return dom;
-}
-
-function isFrame(element) {
-  return element.localName === "iframe" || element.localName === "frame";
-}
-
-// The same walk as `frameCandidates` / `collectFrameOwnerOrder`: pre-order,
-// light children before shadow content, and no descent past a frame. querySelectorAll
-// cannot see a frame hosted in a shadow root, which is the case shadow-frame.html
-// exists to exercise.
-function visitTree(root, visitElement) {
-  const visit = (element) => {
-    visitElement(element);
-    if (isFrame(element)) return;
-    for (const child of Array.from(element.children)) visit(child);
-    if (element.shadowRoot) {
-      for (const child of Array.from(element.shadowRoot.children)) visit(child);
-    }
-  };
-  for (const child of Array.from(root.children)) visit(child);
-}
-
-// jsdom 30 parses `<template shadowrootmode>` as an ordinary template, so a
-// fixture that hosts a frame in a shadow root would otherwise lose that frame.
-// This upgrade matches what a browser does with declarative shadow DOM and
-// keeps frameCandidates / collectFrameOwnerOrder looking at the same tree.
-function upgradeDeclarativeShadows(root) {
-  visitTree(root, (element) => {
-    if (element.shadowRoot) return;
-    const template = [...element.children].find(
-      (child) => child.localName === "template" && child.hasAttribute("shadowrootmode"),
-    );
-    if (!template) return;
-    const mode = template.getAttribute("shadowrootmode") === "closed" ? "closed" : "open";
-    const shadow = element.attachShadow({ mode });
-    shadow.append(template.content.cloneNode(true));
-    template.remove();
-  });
 }
 
 function frameContentDocument(frame) {
@@ -403,9 +366,4 @@ function valueFor(property) {
   if (types.includes("boolean")) return true;
   if (types.includes("integer") || types.includes("number")) return 1;
   return STRING_INPUT;
-}
-
-function messageOf(error) {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }

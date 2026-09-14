@@ -12,12 +12,12 @@ import (
 )
 
 const (
-	defaultTimeout           = 30 * time.Second
-	defaultDOMQuiet          = 250 * time.Millisecond
-	defaultDOMQuietLimit     = 2 * time.Second
-	defaultSelectorAllowance = 2 * time.Second
-	defaultFrameOverhead     = 2 * time.Second
-	defaultExplorationBudget = time.Second
+	DefaultTimeout           = 30 * time.Second
+	DefaultDOMQuiet          = 250 * time.Millisecond
+	DefaultDOMQuietLimit     = 2 * time.Second
+	DefaultSelectorAllowance = 2 * time.Second
+	DefaultFrameOverhead     = 2 * time.Second
+	DefaultExplorationBudget = time.Second
 )
 
 // BrowserSource is the small boundary shared by launch and attach sources.
@@ -36,7 +36,6 @@ type Result struct {
 type DiagnosticSeverity string
 
 const (
-	SeverityInfo    DiagnosticSeverity = "info"
 	SeverityWarning DiagnosticSeverity = "warning"
 )
 

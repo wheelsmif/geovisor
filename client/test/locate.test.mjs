@@ -1,50 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { build } from "esbuild";
 import { JSDOM } from "jsdom";
 
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+import { loadEsbuildModule, repositoryRoot, upgradeDeclarativeShadows } from "./helpers.mjs";
 
 async function loadLocate() {
-  const result = await build({
-    absWorkingDir: repositoryRoot,
-    bundle: true,
-    charset: "utf8",
-    entryPoints: [resolve(repositoryRoot, "client", "src", "shared", "locate.ts")],
-    format: "esm",
-    legalComments: "none",
-    platform: "neutral",
-    write: false,
-  });
-  const output = result.outputFiles[0];
-  if (!output) {
-    throw new Error("esbuild did not produce a locate bundle");
-  }
-  const file = join(await mkdtemp(join(tmpdir(), "geovisor-locate-")), "locate.mjs");
-  await writeFile(file, output.text);
-  return import(pathToFileURL(file).href);
-}
-
-function upgradeDeclarativeShadows(document) {
-  const hosts = [...document.querySelectorAll("*")].filter(
-    (element) => !element.shadowRoot && [...element.children].some(
-      (child) => child.localName === "template" && child.hasAttribute("shadowrootmode"),
-    ),
+  return loadEsbuildModule(
+    resolve(repositoryRoot, "client", "src", "shared", "locate.ts"),
+    "geovisor-locate-",
   );
-  for (const host of hosts) {
-    const template = [...host.children].find(
-      (child) => child.localName === "template" && child.hasAttribute("shadowrootmode"),
-    );
-    const mode = template.getAttribute("shadowrootmode") === "closed" ? "closed" : "open";
-    const shadow = host.attachShadow({ mode });
-    shadow.append(template.content.cloneNode(true));
-    template.remove();
-  }
 }
 
 // GV-003 / Phase 6.3. The Go walk in collectFrameOwnerOrder and this

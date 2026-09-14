@@ -51,7 +51,7 @@ func detachTarget(browser *rod.Browser, sessionID proto.TargetSessionID) {
 	if browser == nil || sessionID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDOMQuietLimit)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultDOMQuietLimit)
 	defer cancel()
 	_ = (proto.TargetDetachFromTarget{SessionID: sessionID}).Call(browser.Context(ctx))
 }

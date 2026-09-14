@@ -25,17 +25,19 @@ import {
   readExpected,
   referencedText,
 } from "./shared/dom";
+import {
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_OPERATIONS,
+  DEFAULT_TIMEOUT_MS,
+  MAX_DEPTH,
+  MAX_OPERATIONS,
+  MAX_TIMEOUT_MS,
+} from "./shared/limits";
 import { GENERIC_ROLE, isContentEditable, semanticRole } from "./shared/role";
 import { semanticMatches } from "./shared/locate";
 import { accessibleName, type NameSource } from "./shared/name";
 import { optionLabels } from "./shared/option";
 
-const DEFAULT_MAX_DEPTH = 3;
-const DEFAULT_MAX_OPERATIONS = 20;
-const DEFAULT_TIMEOUT_MS = 1_000;
-const MAX_DEPTH = 16;
-const MAX_OPERATIONS = 500;
-const MAX_TIMEOUT_MS = 10_000;
 /** Per-call @medv/finder budget. Exhaustion falls back to simpleSelector (GV-033). */
 const FINDER_TIMEOUT_MS = 50;
 
@@ -316,15 +318,22 @@ function traverse(root: Document | ShadowRoot): ElementRecord[] {
   return records;
 }
 
+function documentOrShadowRoot(element: Element): Document | ShadowRoot | null {
+  return read<Document | ShadowRoot | null>(null, () => {
+    const node = element.getRootNode();
+    return node instanceof Document || node instanceof ShadowRoot ? node : null;
+  });
+}
+
 function semanticScope(element: Element): SemanticNode[] {
-  const landmarks: Element[] = [];
+  const landmarks: { element: Element; role: string; name: LabelResult }[] = [];
   let current = parentAcrossShadow(element);
   while (current && landmarks.length < 4) {
     const role = semanticRole(current);
     if (LANDMARK_ROLES.has(role)) {
       const name = labelFor(current, role, 0);
       if (name.reference !== "deterministic-fallback") {
-        landmarks.push(current);
+        landmarks.push({ element: current, role, name });
       }
     }
     current = parentAcrossShadow(current);
@@ -332,30 +341,22 @@ function semanticScope(element: Element): SemanticNode[] {
   landmarks.reverse();
 
   const nodes: SemanticNode[] = [];
-  let scopeRoot: Document | ShadowRoot | Element | null = read<Document | ShadowRoot | null>(
-    null,
-    () => {
-      const node = element.getRootNode();
-      return node instanceof Document || node instanceof ShadowRoot ? node : null;
-    },
-  );
+  let scopeRoot: Document | ShadowRoot | Element | null = documentOrShadowRoot(element);
   for (const landmark of landmarks) {
-    const role = semanticRole(landmark);
-    const name = labelFor(landmark, role, 0);
-    const node: SemanticNode = { role, name: name.text };
+    const node: SemanticNode = { role: landmark.role, name: landmark.name.text };
     if (scopeRoot) {
       const matches = read<Element[]>([], () =>
         semanticMatches(scopeRoot as Document | ShadowRoot | Element, {
-          role,
-          name: name.text,
+          role: landmark.role,
+          name: landmark.name.text,
         }),
       );
-      const nth = matches.indexOf(landmark);
+      const nth = matches.indexOf(landmark.element);
       if (nth < 0) continue;
       if (matches.length > 1) node.nth = nth;
     }
     nodes.push(node);
-    scopeRoot = landmark;
+    scopeRoot = landmark.element;
   }
   return nodes;
 }
@@ -400,10 +401,7 @@ function verifiedSemantic(
   role: string,
   name?: string,
 ): SemanticLocator | undefined {
-  const root = read<Document | ShadowRoot | null>(null, () => {
-    const node = element.getRootNode();
-    return node instanceof Document || node instanceof ShadowRoot ? node : null;
-  });
+  const root = documentOrShadowRoot(element);
   if (!root) return undefined;
 
   const semantic: SemanticLocator = { scope: semanticScope(element), role };
@@ -439,11 +437,11 @@ function controlValueType(element: Element): ValueType {
         return "string";
     }
   }
-  if (explicitRole(element) === "checkbox" || explicitRole(element) === "radio" ||
-      explicitRole(element) === "switch") {
+  const role = explicitRole(element);
+  if (role === "checkbox" || role === "radio" || role === "switch") {
     return "boolean";
   }
-  if (explicitRole(element) === "slider" || explicitRole(element) === "spinbutton") {
+  if (role === "slider" || role === "spinbutton") {
     return "number";
   }
   return "string";
@@ -545,10 +543,6 @@ function isOmittedCustomWidget(element: Element): boolean {
   return OMITTED_CUSTOM_ROLES.has(explicitRole(element));
 }
 
-function isControl(element: Element): boolean {
-  return isFillableControl(element);
-}
-
 function isAction(element: Element): boolean {
   if (element.matches("button, a[href], summary")) return true;
   if (isButtonLikeInput(element)) return true;
@@ -617,38 +611,54 @@ function descriptionFor(element: Element): string {
   );
 }
 
-function controlInteraction(record: ElementRecord): Interaction {
+function interactionIdentity(record: ElementRecord): {
+  role: string;
+  label: LabelResult;
+  description: string;
+  scope: SemanticNode[];
+  locators: Locator[];
+  evidence: Evidence[];
+} {
   const role = semanticRole(record.element) || GENERIC_ROLE;
   const label = labelFor(record.element, role, record.sourceOrder);
-  const parameter = parameterFor(record.element, label, record.sourceOrder);
-  const description = descriptionFor(record.element);
   return {
-    kind: "control",
-    framePath: [],
-    scope: semanticScope(record.element),
     role,
-    name: recordedName(label),
-    ...(description ? { description } : {}),
-    parameters: [parameter],
+    label,
+    description: descriptionFor(record.element),
+    scope: semanticScope(record.element),
     locators: [locatorFor(record, role, locatorMatchName(label))],
-    actions: [controlAction(record.element, parameter.name)],
     evidence: evidenceFor(label, record.element),
   };
 }
 
+function controlInteraction(record: ElementRecord): Interaction {
+  const identity = interactionIdentity(record);
+  const parameter = parameterFor(record.element, identity.label, record.sourceOrder);
+  return {
+    kind: "control",
+    framePath: [],
+    scope: identity.scope,
+    role: identity.role,
+    name: recordedName(identity.label),
+    ...(identity.description ? { description: identity.description } : {}),
+    parameters: [parameter],
+    locators: identity.locators,
+    actions: [controlAction(record.element, parameter.name)],
+    evidence: identity.evidence,
+  };
+}
+
 function actionInteraction(record: ElementRecord): Interaction {
-  const role = semanticRole(record.element) || GENERIC_ROLE;
-  const label = labelFor(record.element, role, record.sourceOrder);
-  const description = descriptionFor(record.element);
+  const identity = interactionIdentity(record);
   return {
     kind: "action",
     framePath: [],
-    scope: semanticScope(record.element),
-    role,
-    name: recordedName(label),
-    ...(description ? { description } : {}),
+    scope: identity.scope,
+    role: identity.role,
+    name: recordedName(identity.label),
+    ...(identity.description ? { description: identity.description } : {}),
     parameters: [],
-    locators: [locatorFor(record, role, locatorMatchName(label))],
+    locators: identity.locators,
     actions: [
       {
         kind: "click",
@@ -656,7 +666,7 @@ function actionInteraction(record: ElementRecord): Interaction {
         sideEffect: actionEffect(record.element),
       },
     ],
-    evidence: evidenceFor(label, record.element),
+    evidence: identity.evidence,
   };
 }
 
@@ -669,13 +679,13 @@ function associatedForm(element: Element): HTMLFormElement | null {
   return element.closest("form");
 }
 
-/** The visible controls and actions a form owns, in source order. */
+/** The visible, enabled, form-associated fillable controls a form owns, in source order. */
 function formMembers(form: HTMLFormElement, records: ElementRecord[]): ElementRecord[] {
   return records.filter(
     (record) =>
       !record.hidden &&
       !record.disabled &&
-      (isControl(record.element) || isAction(record.element)) &&
+      isFillableControl(record.element) &&
       associatedForm(record.element) === form,
   );
 }
@@ -684,13 +694,12 @@ function formInteraction(formRecord: ElementRecord, members: ElementRecord[]): I
   const form = formRecord.element as HTMLFormElement;
   const role = explicitRole(form) || "form";
   const label = labelFor(form, role, formRecord.sourceOrder);
-  const controls = members.filter((record) => isControl(record.element));
   const names = new Map<string, number>();
   const parameters: Parameter[] = [];
   const locators: Locator[] = [];
   const actions: Action[] = [];
 
-  for (const record of controls) {
+  for (const record of members) {
     const controlRole = semanticRole(record.element) || GENERIC_ROLE;
     const controlLabel = labelFor(record.element, controlRole, record.sourceOrder);
     const base = parameterName(controlLabel.text);
@@ -862,7 +871,7 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
       const members = read<ElementRecord[]>([], () => formMembers(record.element as HTMLFormElement, records));
       formMemberIndex.set(record.element, members);
       for (const member of members) {
-        if (isControl(member.element)) claimed.add(member.element);
+        claimed.add(member.element);
       }
     }
 
@@ -880,7 +889,7 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
           // Already a parameter of its form's tool.
         } else if (isOmittedCustomWidget(element)) {
           omittedCustom++;
-        } else if (isControl(element)) {
+        } else if (isFillableControl(element)) {
           const interaction = controlInteraction(record);
           explorationEvidence(interaction, element, exploration);
           interactions.push(interaction);

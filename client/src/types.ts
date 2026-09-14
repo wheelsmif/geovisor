@@ -27,7 +27,14 @@ export interface Frame {
 export interface SemanticNode {
   role: string;
   name?: string;
-  /** Index among the elements this node matches; 0 when absent. See GV-004. */
+  /**
+   * Index among the elements this node matches; 0 when absent.
+   *
+   * This is how ambiguity among elements with the same role and name is
+   * resolved (GV-004). It exists because the alternative -- mutating the name
+   * to make it unique -- produces a name no element in the DOM carries, so the
+   * locator can never match.
+   */
   nth?: number;
 }
 

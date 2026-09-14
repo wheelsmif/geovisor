@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -214,7 +215,7 @@ func stageFile(directory, base string, data []byte) (path string, returnedError 
 	if err := file.Chmod(filePermission); err != nil {
 		return "", err
 	}
-	if err := writeAll(file, data); err != nil {
+	if err := WriteAll(file, data); err != nil {
 		return "", err
 	}
 	if err := file.Sync(); err != nil {
@@ -226,14 +227,15 @@ func stageFile(directory, base string, data []byte) (path string, returnedError 
 	return path, nil
 }
 
-func writeAll(file *os.File, data []byte) error {
+// WriteAll copies data to writer until every byte is written or a write fails.
+func WriteAll(writer io.Writer, data []byte) error {
 	for len(data) > 0 {
-		written, err := file.Write(data)
+		written, err := writer.Write(data)
 		if err != nil {
 			return err
 		}
 		if written == 0 {
-			return errors.New("write made no progress")
+			return io.ErrShortWrite
 		}
 		data = data[written:]
 	}

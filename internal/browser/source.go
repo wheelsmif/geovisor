@@ -162,7 +162,7 @@ func cleanupOwnedBrowser(connection *browserConnection, process *launcher.Launch
 		return
 	}
 	if connection != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultDOMQuietLimit)
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultDOMQuietLimit)
 		_ = (proto.BrowserClose{}).Call(connection.browser.Context(ctx))
 		cancel()
 		connection.closeTransport()

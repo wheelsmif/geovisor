@@ -64,7 +64,7 @@ func TestEndpointAndSelectorValidation(t *testing.T) {
 	if err := validateAttachOptions(&options); err != nil {
 		t.Fatalf("validate attach options: %v", err)
 	}
-	if options.Timeout != defaultTimeout || options.DOMQuietPeriod != defaultDOMQuiet {
+	if options.Timeout != DefaultTimeout || options.DOMQuietPeriod != DefaultDOMQuiet {
 		t.Fatalf("timing defaults not applied: %+v", options)
 	}
 
@@ -190,7 +190,7 @@ func TestFrameTimeoutDefaultsProportionately(t *testing.T) {
 	if err := validateLaunchOptions(&options); err != nil {
 		t.Fatalf("validate launch options: %v", err)
 	}
-	want := defaultExplorationBudget + defaultSelectorAllowance + defaultFrameOverhead
+	want := DefaultExplorationBudget + DefaultSelectorAllowance + DefaultFrameOverhead
 	if options.FrameTimeout != want {
 		t.Fatalf("default FrameTimeout = %s, want %s", options.FrameTimeout, want)
 	}
@@ -203,7 +203,7 @@ func TestFrameTimeoutDefaultsProportionately(t *testing.T) {
 	if err := validateLaunchOptions(&options); err != nil {
 		t.Fatalf("validate launch options with exploration: %v", err)
 	}
-	want = 4*time.Second + defaultSelectorAllowance + defaultFrameOverhead
+	want = 4*time.Second + DefaultSelectorAllowance + DefaultFrameOverhead
 	if options.FrameTimeout != want {
 		t.Fatalf("proportionate FrameTimeout = %s, want %s", options.FrameTimeout, want)
 	}

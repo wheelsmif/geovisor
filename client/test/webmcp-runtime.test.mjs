@@ -1,33 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { build } from "esbuild";
 import { JSDOM } from "jsdom";
 
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+import { loadEsbuildModule, repositoryRoot } from "./helpers.mjs";
 
 async function loadRuntime() {
-  const result = await build({
-    absWorkingDir: repositoryRoot,
-    bundle: true,
-    charset: "utf8",
-    entryPoints: [resolve(repositoryRoot, "client", "src", "webmcp-runtime.ts")],
-    format: "esm",
-    legalComments: "none",
-    platform: "neutral",
-    write: false,
-  });
-  const output = result.outputFiles[0];
-  if (!output) {
-    throw new Error("esbuild did not produce a runtime bundle");
-  }
-  const file = join(await mkdtemp(join(tmpdir(), "geovisor-runtime-")), "runtime.mjs");
-  await writeFile(file, output.text);
-  return import(pathToFileURL(file).href);
+  return loadEsbuildModule(
+    resolve(repositoryRoot, "client", "src", "webmcp-runtime.ts"),
+    "geovisor-runtime-",
+  );
 }
 
 async function registerFill(window, required = true) {

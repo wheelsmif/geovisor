@@ -243,36 +243,12 @@ func validateNth(field string, nth int) error {
 }
 
 func validateParameter(path string, parameter *Parameter) error {
-	if !validValueType(parameter.Type) {
-		return invalid(path+".type", "invalid_value_type", "contains an unsupported value")
-	}
-	if err := validateShapeCompatibility(path, parameter.Type, parameter.Enum, parameter.Items, parameter.Properties); err != nil {
-		return err
-	}
-	if err := validateUniqueStrings(path+".enum", parameter.Enum); err != nil {
-		return err
-	}
-	if parameter.Items != nil {
-		if err := validateShape(path+".items", parameter.Items); err != nil {
-			return err
-		}
-	}
-	seen := make(map[string]struct{}, len(parameter.Properties))
-	for i := range parameter.Properties {
-		propertyPath := fmt.Sprintf("%s.properties[%d]", path, i)
-		property := &parameter.Properties[i]
-		if strings.TrimSpace(property.Name) == "" {
-			return invalid(propertyPath+".name", "required", "must not be empty")
-		}
-		if _, exists := seen[property.Name]; exists {
-			return invalid(propertyPath+".name", "duplicate_property_name", "must be unique")
-		}
-		seen[property.Name] = struct{}{}
-		if err := validateShape(propertyPath+".shape", &property.Shape); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateShape(path, &ParameterShape{
+		Type:       parameter.Type,
+		Enum:       parameter.Enum,
+		Items:      parameter.Items,
+		Properties: parameter.Properties,
+	})
 }
 
 func validateShape(path string, shape *ParameterShape) error {

@@ -2,7 +2,7 @@
 // Both sides must normalize identically or a name recorded at extraction time
 // will not compare equal to the same name recomputed at execution time.
 
-export const TEXT_LIMIT = 256;
+const TEXT_LIMIT = 256;
 export const DESCRIPTION_LIMIT = 512;
 
 /**

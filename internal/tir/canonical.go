@@ -234,14 +234,14 @@ func cloneTool(tool Tool) Tool {
 }
 
 func cloneParameter(parameter Parameter) Parameter {
-	result := parameter
-	result.Enum = append([]string(nil), parameter.Enum...)
-	if parameter.Items != nil {
-		items := cloneShape(*parameter.Items)
-		result.Items = &items
-	}
-	result.Properties = cloneProperties(parameter.Properties)
-	return result
+	shape := cloneShape(ParameterShape{
+		Type: parameter.Type, Enum: parameter.Enum,
+		Items: parameter.Items, Properties: parameter.Properties,
+	})
+	parameter.Enum = shape.Enum
+	parameter.Items = shape.Items
+	parameter.Properties = shape.Properties
+	return parameter
 }
 
 func cloneShape(shape ParameterShape) ParameterShape {

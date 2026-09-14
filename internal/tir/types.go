@@ -307,18 +307,14 @@ func normalizeTool(tool *Tool) {
 }
 
 func normalizeParameter(parameter *Parameter) {
-	if parameter.Enum == nil {
-		parameter.Enum = []string{}
+	shape := ParameterShape{
+		Type: parameter.Type, Enum: parameter.Enum,
+		Items: parameter.Items, Properties: parameter.Properties,
 	}
-	if parameter.Properties == nil {
-		parameter.Properties = []ParameterProperty{}
-	}
-	if parameter.Items != nil {
-		normalizeShape(parameter.Items)
-	}
-	for i := range parameter.Properties {
-		normalizeShape(&parameter.Properties[i].Shape)
-	}
+	normalizeShape(&shape)
+	parameter.Enum = shape.Enum
+	parameter.Items = shape.Items
+	parameter.Properties = shape.Properties
 }
 
 func normalizeShape(shape *ParameterShape) {

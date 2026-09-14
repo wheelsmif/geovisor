@@ -21,15 +21,11 @@ import (
 )
 
 const (
-	defaultTimeout            = 30 * time.Second
-	defaultDOMQuiet           = 250 * time.Millisecond
-	defaultDOMQuietTimeout    = 2 * time.Second
-	defaultDepth              = 3
-	defaultMaxOperations      = 20
-	defaultExplorationTimeout = time.Second
-	maxDepth                  = 16
-	maxOperations             = 500
-	maxExplorationTimeout     = 10 * time.Second
+	defaultDepth          = 3
+	defaultMaxOperations  = 20
+	maxDepth              = 16
+	maxOperations         = 500
+	maxExplorationTimeout = 10 * time.Second
 )
 
 // Registry is the emitter boundary consumed by the CLI.
@@ -111,11 +107,7 @@ func RunWithDependencies(
 
 	root := newRootCommand(stdout, stderr, dependencies)
 	root.SetArgs(args)
-	err := root.ExecuteContext(ctx)
-	if err == nil {
-		return nil
-	}
-	return err
+	return root.ExecuteContext(ctx)
 }
 
 func validateDependencies(dependencies Dependencies) error {
@@ -166,12 +158,12 @@ func newRootCommand(stdout, stderr io.Writer, dependencies Dependencies) *cobra.
 func newInspectCommand(stdout, stderr io.Writer, dependencies Dependencies) *cobra.Command {
 	options := inspectOptions{
 		Format:             "tir",
-		Timeout:            defaultTimeout,
-		DOMQuiet:           defaultDOMQuiet,
-		DOMQuietTimeout:    defaultDOMQuietTimeout,
+		Timeout:            browser.DefaultTimeout,
+		DOMQuiet:           browser.DefaultDOMQuiet,
+		DOMQuietTimeout:    browser.DefaultDOMQuietLimit,
 		Depth:              defaultDepth,
 		MaxOperations:      defaultMaxOperations,
-		ExplorationTimeout: defaultExplorationTimeout,
+		ExplorationTimeout: browser.DefaultExplorationBudget,
 		Target:             "active",
 	}
 
@@ -523,17 +515,7 @@ func validateArtifactName(name string) error {
 }
 
 func writeBytes(writer io.Writer, data []byte) error {
-	for len(data) > 0 {
-		written, err := writer.Write(data)
-		if err != nil {
-			return err
-		}
-		if written == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[written:]
-	}
-	return nil
+	return output.WriteAll(writer, data)
 }
 
 func usagef(format string, arguments ...any) error {

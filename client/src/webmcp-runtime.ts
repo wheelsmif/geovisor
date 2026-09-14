@@ -173,6 +173,11 @@ function dispatchInput(element: Element): void {
   element.dispatchEvent(new EventCtor("input", { bubbles: true }));
 }
 
+function notifyValueChange(element: Element): void {
+  dispatchInput(element);
+  dispatch(element, "change");
+}
+
 function apply(element: Element, binding: ActionBinding, value: unknown): void {
   switch (binding.action) {
     case "click":
@@ -211,8 +216,7 @@ function applyFill(element: Element, value: unknown): void {
   } else {
     throw new Error("resolved element cannot accept text");
   }
-  dispatchInput(element);
-  dispatch(element, "change");
+  notifyValueChange(element);
 }
 
 /**
@@ -235,8 +239,7 @@ function applySelect(element: Element, value: unknown): void {
     throw new Error(`no option labelled ${JSON.stringify(wanted)} exists`);
   }
   setNativeProperty(select, "selectedIndex", index);
-  dispatchInput(element);
-  dispatch(element, "change");
+  notifyValueChange(element);
 }
 
 function applyCheck(element: Element, binding: ActionBinding, value: unknown): void {
@@ -248,6 +251,5 @@ function applyCheck(element: Element, binding: ActionBinding, value: unknown): v
     throw new Error("resolved element is not a checkbox or radio input");
   }
   setNativeProperty(input, "checked", binding.inputParameter ? Boolean(value) : true);
-  dispatchInput(element);
-  dispatch(element, "change");
+  notifyValueChange(element);
 }

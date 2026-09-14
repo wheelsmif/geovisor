@@ -12,13 +12,11 @@ func validateLaunchOptions(options *LaunchOptions) error {
 	if _, err := validateTargetURL(options.URL); err != nil {
 		return configurationError("launch.url", err)
 	}
-	applyTimingDefaults(&options.Timeout, &options.DOMQuietPeriod, &options.DOMQuietTimeout)
-	applyFrameTimeoutDefault(&options.FrameTimeout, options.Extraction.TimeoutMS)
-	if err := validateTimings(options.Timeout, options.DOMQuietPeriod, options.DOMQuietTimeout); err != nil {
-		return configurationError("launch.timing", err)
-	}
-	if err := validateFrameTimeout(options.FrameTimeout, options.Extraction.TimeoutMS); err != nil {
-		return configurationError("launch.frame_timeout", err)
+	if err := applyAndValidateTimings(
+		&options.Timeout, &options.DOMQuietPeriod, &options.DOMQuietTimeout,
+		&options.FrameTimeout, options.Extraction.TimeoutMS,
+	); err != nil {
+		return wrapTimingConfiguration("launch", err)
 	}
 	return nil
 }
@@ -35,26 +33,43 @@ func validateAttachOptions(options *AttachOptions) error {
 	if err := validateSelector(&options.Selector); err != nil {
 		return configurationError("attach.selector", err)
 	}
-	applyTimingDefaults(&options.Timeout, &options.DOMQuietPeriod, &options.DOMQuietTimeout)
-	applyFrameTimeoutDefault(&options.FrameTimeout, options.Extraction.TimeoutMS)
-	if err := validateTimings(options.Timeout, options.DOMQuietPeriod, options.DOMQuietTimeout); err != nil {
-		return configurationError("attach.timing", err)
-	}
-	if err := validateFrameTimeout(options.FrameTimeout, options.Extraction.TimeoutMS); err != nil {
-		return configurationError("attach.frame_timeout", err)
+	if err := applyAndValidateTimings(
+		&options.Timeout, &options.DOMQuietPeriod, &options.DOMQuietTimeout,
+		&options.FrameTimeout, options.Extraction.TimeoutMS,
+	); err != nil {
+		return wrapTimingConfiguration("attach", err)
 	}
 	return nil
 }
 
+func applyAndValidateTimings(
+	timeout, quietPeriod, quietTimeout, frameTimeout *time.Duration,
+	explorationMS int,
+) error {
+	applyTimingDefaults(timeout, quietPeriod, quietTimeout)
+	applyFrameTimeoutDefault(frameTimeout, explorationMS)
+	if err := validateTimings(*timeout, *quietPeriod, *quietTimeout); err != nil {
+		return err
+	}
+	return validateFrameTimeout(*frameTimeout, explorationMS)
+}
+
+func wrapTimingConfiguration(prefix string, err error) error {
+	if strings.HasPrefix(err.Error(), "frame timeout") {
+		return configurationError(prefix+".frame_timeout", err)
+	}
+	return configurationError(prefix+".timing", err)
+}
+
 func applyTimingDefaults(timeout, quietPeriod, quietTimeout *time.Duration) {
 	if *timeout == 0 {
-		*timeout = defaultTimeout
+		*timeout = DefaultTimeout
 	}
 	if *quietPeriod == 0 {
-		*quietPeriod = defaultDOMQuiet
+		*quietPeriod = DefaultDOMQuiet
 	}
 	if *quietTimeout == 0 {
-		*quietTimeout = defaultDOMQuietLimit
+		*quietTimeout = DefaultDOMQuietLimit
 	}
 }
 
@@ -79,14 +94,14 @@ func applyFrameTimeoutDefault(frameTimeout *time.Duration, explorationMS int) {
 
 func defaultFrameTimeout(exploration time.Duration) time.Duration {
 	if exploration <= 0 {
-		exploration = defaultExplorationBudget
+		exploration = DefaultExplorationBudget
 	}
-	return exploration + defaultSelectorAllowance + defaultFrameOverhead
+	return exploration + DefaultSelectorAllowance + DefaultFrameOverhead
 }
 
 func explorationBudget(timeoutMS int) time.Duration {
 	if timeoutMS <= 0 {
-		return defaultExplorationBudget
+		return DefaultExplorationBudget
 	}
 	return time.Duration(timeoutMS) * time.Millisecond
 }

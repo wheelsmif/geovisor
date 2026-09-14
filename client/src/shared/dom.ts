@@ -95,20 +95,30 @@ function lookupRoot(element: Element): Document | ShadowRoot | null {
 }
 
 /**
+ * Reports whether the element is an editable host.
+ *
+ * `hasAttribute("contenteditable")` is true for the string "false" (GV-005), so
+ * the attribute value is what decides.
+ */
+export function isContentEditable(element: Element): boolean {
+  const value = element.getAttribute("contenteditable");
+  if (value === null) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "" || normalized === "true" || normalized === "plaintext-only";
+}
+
+/**
  * Reports whether an element carries a current value that ACCNAME must skip.
  *
  * Accessible-name computation does not include the contents of embedded
  * controls. `textarea.textContent` is the current value, so treating it as
  * name text leaked drafts and PII (P20).
  */
-export function isValueBearingControl(element: Element): boolean {
+function isValueBearingControl(element: Element): boolean {
   const tag = element.localName;
   if (tag === "textarea" || tag === "select") return true;
   if (tag === "input") return inputType(element) !== "hidden";
-  const editable = element.getAttribute("contenteditable");
-  if (editable === null) return false;
-  const normalized = editable.trim().toLowerCase();
-  return normalized === "" || normalized === "true" || normalized === "plaintext-only";
+  return isContentEditable(element);
 }
 
 /**

@@ -5,8 +5,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"net/url"
 
+	"github.com/wheelsmif/geovisor/internal/pageurl"
 	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
@@ -107,18 +107,10 @@ func (WebMCP) Emit(
 }
 
 func webMCPPageOrigin(source tir.SourceMetadata) string {
-	if origin := originOfURL(source.FinalURL); origin != "" {
+	if origin := pageurl.Origin(source.FinalURL); origin != "" {
 		return origin
 	}
-	return originOfURL(source.RequestedURL)
-}
-
-func originOfURL(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return ""
-	}
-	return parsed.Scheme + "://" + parsed.Host
+	return pageurl.Origin(source.RequestedURL)
 }
 
 func filterWebMCPTool(tool *tir.Tool, pageOrigin string, coverage tir.FrameCoverage) *tir.Tool {
@@ -174,7 +166,7 @@ func locatorResolvableInPage(locator tir.LocatorCandidate, pageOrigin string, co
 		if origin != "" && origin != pageOrigin {
 			return false
 		}
-		if srcOrigin := originOfURL(src); srcOrigin != "" && srcOrigin != pageOrigin {
+		if srcOrigin := pageurl.Origin(src); srcOrigin != "" && srcOrigin != pageOrigin {
 			return false
 		}
 	}

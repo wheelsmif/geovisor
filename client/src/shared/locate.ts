@@ -4,23 +4,12 @@
 // beside the role and name functions the extractor uses to *record* locators,
 // so producer and consumer cannot drift.
 
+import type { SemanticNode } from "../types";
 import { read } from "./dom";
 import { accessibleName } from "./name";
 import { normalizeRole, semanticRole } from "./role";
 
-export interface SemanticNode {
-  role: string;
-  name?: string;
-  /**
-   * Index into the ordered set of elements this node matches; 0 when absent.
-   *
-   * This is how ambiguity among elements with the same role and name is
-   * resolved (GV-004). It exists because the alternative -- mutating the name
-   * to make it unique -- produces a name no element in the DOM carries, so the
-   * locator can never match.
-   */
-  nth?: number;
-}
+export type { SemanticNode };
 
 export interface SemanticLocator extends SemanticNode {
   scope?: SemanticNode[];

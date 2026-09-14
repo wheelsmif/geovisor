@@ -10,6 +10,7 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 
 	"github.com/wheelsmif/geovisor/internal/observation"
+	"github.com/wheelsmif/geovisor/internal/pageurl"
 )
 
 // These cover the live frame-tree functions. The one function that had a test
@@ -466,9 +467,10 @@ func TestPageURLStripsQueryAndFragment(t *testing.T) {
 		{raw: "http://example.test:8080/", want: "http://example.test:8080/"},
 		{raw: "about:blank", want: "about:blank"},
 		{raw: "", want: ""},
+		{raw: "https://example.test/foo  bar", want: "https://example.test/foo%20bar"},
 	} {
-		if got := pageURL(test.raw); got != test.want {
-			t.Errorf("pageURL(%q) = %q, want %q", test.raw, got, test.want)
+		if got := pageurl.PageURL(test.raw); got != test.want {
+			t.Errorf("PageURL(%q) = %q, want %q", test.raw, got, test.want)
 		}
 	}
 }
@@ -589,8 +591,8 @@ func TestOriginForURLRejectsUnusableURLs(t *testing.T) {
 		{raw: "data:text/html,hi", want: ""},
 		{raw: "", want: ""},
 	} {
-		if got := originForURL(test.raw); got != test.want {
-			t.Errorf("originForURL(%q) = %q, want %q", test.raw, got, test.want)
+		if got := pageurl.Origin(test.raw); got != test.want {
+			t.Errorf("Origin(%q) = %q, want %q", test.raw, got, test.want)
 		}
 	}
 }

@@ -8,7 +8,9 @@
 // function, which makes that class of divergence impossible rather than merely
 // tested.
 
-import { explicitRole, inputType } from "./dom";
+import { explicitRole, inputType, isContentEditable } from "./dom";
+
+export { isContentEditable };
 
 /**
  * The role used when an element has no mapped role. Locators record "generic"
@@ -59,19 +61,6 @@ export function semanticRole(element: Element): string {
   // better than a role that is merely asserted. See FRAME_ROLE in locate.ts.
   if (tag === "iframe" || tag === "frame") return "iframe";
   return "";
-}
-
-/**
- * Reports whether the element is an editable host.
- *
- * `hasAttribute("contenteditable")` is true for the string "false" (GV-005), so
- * the attribute value is what decides.
- */
-export function isContentEditable(element: Element): boolean {
-  const value = element.getAttribute("contenteditable");
-  if (value === null) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === "" || normalized === "true" || normalized === "plaintext-only";
 }
 
 /** Normalizes an absent role so producer and consumer compare equal. */
