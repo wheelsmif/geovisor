@@ -129,6 +129,55 @@ func TestInspectRejectsInvalidModesBeforeSourceConstruction(t *testing.T) {
 	}
 }
 
+func TestInspectAcceptsTIRFormatAliases(t *testing.T) {
+	t.Parallel()
+	for _, format := range []string{"tir", "tir-json"} {
+		format := format
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			var got []emitter.Format
+			dependencies := successfulDependencies()
+			dependencies.Registry = stubRegistry{emit: func(
+				_ context.Context,
+				selected emitter.Format,
+				_ *tir.Document,
+				_ emitter.Options,
+			) (emitter.Result, error) {
+				got = append(got, selected)
+				return emitter.Result{Primary: emitter.Artifact{
+					Name: "artifact.json", Data: []byte("artifact"),
+				}}, nil
+			}}
+			err := RunWithDependencies(
+				context.Background(),
+				[]string{"inspect", "https://example.test", "--format", format},
+				&bytes.Buffer{}, &bytes.Buffer{}, dependencies,
+			)
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if len(got) != 1 || got[0] != emitter.FormatTIRJSON {
+				t.Fatalf("formats = %v, want [%s]", got, emitter.FormatTIRJSON)
+			}
+		})
+	}
+
+	t.Run("yaml", func(t *testing.T) {
+		t.Parallel()
+		err := RunWithDependencies(
+			context.Background(),
+			[]string{"inspect", "https://example.test", "--format", "yaml"},
+			&bytes.Buffer{}, &bytes.Buffer{}, successfulDependencies(),
+		)
+		if ExitCode(err) != ExitUsage {
+			t.Fatalf("error = %v, exit = %d, want usage %d", err, ExitCode(err), ExitUsage)
+		}
+		if err == nil || !strings.Contains(err.Error(), "tir-json") {
+			t.Fatalf("error = %v, want both format aliases listed", err)
+		}
+	})
+}
+
 func TestInspectBuildsLaunchAndAttachSources(t *testing.T) {
 	t.Parallel()
 	t.Run("launch", func(t *testing.T) {

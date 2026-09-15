@@ -15,7 +15,10 @@ The intended flow is:
 
 - `cmd/geovisor`: process entry point.
 - `internal/cli`: argument shell, exit-code policy, and stream ownership.
-- `internal/browser`: URL launch and CDP attach source adapters.
+- `internal/browser`: URL launch and CDP attach source adapters. Sources
+  assemble `compiler.Input` (`observation.Source` plus batches).
+- `internal/pageurl`: origin+path URL normalization; no browser or emitter
+  imports.
 - `internal/payload`: committed embedded browser extraction payload.
 - `internal/observation`: browser-independent extraction facts.
 - `internal/compiler`: deterministic observation-to-TIR aggregation.
@@ -26,9 +29,9 @@ The intended flow is:
 - `internal/version`: development default and release version injection point.
 - `schemas`: language-neutral JSON contract.
 
-Browser sources depend on observations, the compiler depends on observations
-and TIR, and emitters depend only on TIR. TIR does not import browser
-automation, protocol, or emitter-specific types.
+Browser sources assemble `compiler.Input` and depend on observations. The
+compiler depends on observations and TIR, and emitters depend only on TIR. TIR
+does not import browser automation, protocol, or emitter-specific types.
 
 ## Process and streams
 
@@ -41,10 +44,12 @@ Human-readable help, version output, and diagnostics use standard error.
 
 Canonical DTOs use ordered slices instead of maps. `NewDocument` and
 `Document.Normalize` ensure non-null collections. `Document.Validate` and
-`schemas/tir.schema.json` share the same contract: type-consistent parameter
-shapes, tool IDs that match `^[A-Za-z0-9_-]{1,64}$`, unambiguous length-prefixed
-frame-path keys, explicit partial frame coverage, and the prohibition on safe
-exploration of navigation, submission, or unknown. A document that passes
-validation emits on every registered format.
+`schemas/tir.schema.json` share shape, tool-ID pattern, coverage, and
+unsafe-exploration constraints: type-consistent parameter shapes, tool IDs that
+match `^[A-Za-z0-9_-]{1,64}$`, explicit partial frame coverage, and the
+prohibition on safe exploration of navigation, submission, or unknown.
+Length-prefixed `framePathKey` uniqueness is enforced by Go `tir.Validate` and
+`canonical` only; the JSON Schema does not implement those keys. A document
+that passes validation emits on every registered format.
 
 See `docs/adr` for the decisions that establish these boundaries.

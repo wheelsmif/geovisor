@@ -14,13 +14,9 @@ const (
 	familyEnumCap                = 64
 )
 
-var (
-	citationMarkName  = regexp.MustCompile(`^\[\d+\]$`)
-	doiName           = regexp.MustCompile(`(?i)^(?:doi:\s*)?(?:https?://(?:dx\.)?doi\.org/)?10\.\d{4,}/\S+$`)
-	bareRFCOrDOI      = regexp.MustCompile(`(?i)^(?:doi|rfc\s*\d+)$`)
-	citationFragment  = regexp.MustCompile(`(?i)#(?:cite_note|cite_ref|footnote|fn)(?:[-_.:\d]|$)`)
-	reservedInputType = regexp.MustCompile(`(?i)\[type\s*=\s*["']?(submit|reset|image)["']?\]`)
-)
+// citationMarkName, doiName, bareRFCOrDOI, and citationFragment are compiled
+// from lowvalue_patterns.json at init (see lowvalue.go).
+var reservedInputType = regexp.MustCompile(`(?i)\[type\s*=\s*["']?(submit|reset|image)["']?\]`)
 
 // isLowValueAction reports citation marks, DOI/RFC tokens, same-document
 // citation fragments, and unnamed links. Unnamed buttons are kept so they can
@@ -34,10 +30,7 @@ func isLowValueAction(source observation.Interaction) bool {
 	if role == "" {
 		role = defaultRole(source.Kind)
 	}
-	if role == "link" && name == "" {
-		return true
-	}
-	if citationMarkName.MatchString(name) || doiName.MatchString(name) || bareRFCOrDOI.MatchString(name) {
+	if isLowValueName(name, role) {
 		return true
 	}
 	for _, locator := range source.Locators {

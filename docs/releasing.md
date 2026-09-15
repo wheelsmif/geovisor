@@ -1,5 +1,9 @@
 # Local release builds
 
+There are currently no published git tags. The committed default version is
+`0.0.0-dev` in `internal/version`. Local scripts produce archives; that is not
+a GitHub Release.
+
 Run the local quality gate first:
 
 ```powershell

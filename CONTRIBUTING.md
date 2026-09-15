@@ -28,6 +28,10 @@ that `gofmt -l .` prints nothing. `npm run build` regenerates the committed
 changes. Do not commit `node_modules`, `dist`, local profiles, or generated
 inspection output.
 
+`UPDATE_GOLDEN=1` refreshes compiler goldens (`internal/compiler`) and emitter
+goldens (`internal/emitter`). Use it only when the contract change is
+intentional. There is no `webmcp.golden`.
+
 ## Design constraints
 
 - Keep browser execution agent-owned; do not add a host MCP daemon.

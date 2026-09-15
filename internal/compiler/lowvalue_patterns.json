@@ -1,0 +1,6 @@
+{
+  "citationMarkName": "^\\[\\d+\\]$",
+  "doiName": "^(?:doi:\\s*)?(?:https?://(?:dx\\.)?doi\\.org/)?10\\.\\d{4,}/\\S+$",
+  "bareRFCOrDOI": "^(?:doi|rfc\\s*\\d+)$",
+  "citationFragment": "#(?:cite_note|cite_ref|footnote|fn)(?:[-_.:\\d]|$)"
+}

@@ -11,7 +11,8 @@ agent-owned Chromium CDP session.
 
 - Go 1.26.6 or newer 1.26 patch release
 - Node.js 24 and npm (source builds and client tests only)
-- Chromium or a compatible Chrome executable for browser inspection
+- A Chromium-family browser for inspection. Auto-detect includes Chrome,
+  Chromium, and Edge on Windows. `--browser-executable` still wins.
 
 ## Install
 
@@ -62,11 +63,14 @@ geovisor inspect https://example.com --format openai --openai-strict \
   --output tools.openai.json
 ```
 
-MCP and OpenAI are static tool definitions, so they also produce executable
-browser-binding companions. With primary file output, the companion is written
-beside it using its emitter-provided name. Use `--bindings-output` to choose a
-different path. If the primary artifact is sent to stdout without a bindings
-path, GEO-Visor warns on stderr that the bindings were not persisted.
+MCP and OpenAI are static tool definitions, so they also produce binding
+recipe companions. GEO-Visor does not execute those recipes.
+`client/src/apply-runtime.ts` is the in-repo test interpreter and is not
+bundled into the `geovisor` binary. With primary file output, the companion is
+written beside it using its emitter-provided name. Use `--bindings-output` to
+choose a different path. If the primary artifact is sent to stdout without a
+bindings path, GEO-Visor warns on stderr that the binding recipes were not
+persisted.
 
 Emit every built-in format and companion into a directory:
 
@@ -177,9 +181,9 @@ Ctrl-C cancellation exits with `130`.
 
 ## Compatibility
 
-- Windows: amd64 and arm64 release archives; Chromium/Chrome required.
-- Linux: amd64 and arm64 release archives; Chromium/Chrome required.
-- macOS: amd64 and arm64 release archives; Chromium/Chrome required.
+- Windows: amd64 and arm64 release archives; a Chromium-family browser required.
+- Linux: amd64 and arm64 release archives; a Chromium-family browser required.
+- macOS: amd64 and arm64 release archives; a Chromium-family browser required.
 - Browser extraction uses CDP and is tested with installed Chromium-compatible
   browsers.
 - Source development is pinned by `.go-version` and `.node-version` to Go
@@ -199,8 +203,9 @@ comparison checks. See `docs/performance.md`.
   top-level HTTP(S) page. A fresh Chrome window with only a new tab
   (`chrome://`, `about:blank`) is ignored; open the page first or pass `id:` /
   `url:`.
-- `Chromium executable not found`: install Chromium/Chrome or pass
-  `--browser-executable` with the full path.
+- `Chromium executable not found`: install Chrome, Chromium, or Edge, or pass
+  `--browser-executable` with the full path. Auto-detect covers those
+  Chromium-family installs on Windows; `--browser-executable` still wins.
 - `dom_not_quiet`: increase `--dom-quiet-timeout`; the partial observation is
   still explicit and deterministic for the state that was captured.
 - `frame_uncovered`: the frame disappeared, blocked execution, or could not be
@@ -217,6 +222,11 @@ See `CONTRIBUTING.md` for setup, formatting, tests, browser requirements, and
 benchmark commands. Security reports follow `SECURITY.md`. Local release
 scripts cross-compile ignored archives with checksums and both executable
 names; see `docs/releasing.md`.
+
+See also `docs/product-spec.md`, `docs/architecture.md`,
+`docs/format-tir-json.md`, `docs/format-mcp.md`, `docs/format-openai.md`,
+and `docs/adr`. Browser sources and the compiler are described in
+`docs/browser-sources.md` and `docs/compiler.md`.
 
 ## License
 

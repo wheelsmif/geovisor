@@ -9,7 +9,8 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["client/src/**/*.ts"]
+  "include": ["client/src/**/*.ts", "internal/compiler/lowvalue_patterns.json"]
 }

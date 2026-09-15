@@ -55,11 +55,13 @@ reported by the browser source via CDP.
 
 ## Apply runtime
 
-`client/src/apply-runtime.ts` is not a GEO-Visor emitter. It interprets TIR
-action bindings against a document so tests (and an agent-owned executor) can
-prove locators resolve. Because option values are page data that must not leave
-the page, a `<select>` tool advertises option labels; apply matches an option
-by label and sets `selectedIndex` rather than assigning to `value`.
+`client/src/apply-runtime.ts` is a test-only interpreter. It is not shipped
+with the `geovisor` binary and is not a GEO-Visor emitter. The apply
+round-trip harness (`internal/integration/apply_roundtrip_test.go`) uses it to
+prove locators resolve. An agent-owned executor may reuse the idea; GEO-Visor
+does not ship one. Because option values are page data that must not leave the
+page, a `<select>` tool advertises option labels; apply matches an option by
+label and sets `selectedIndex` rather than assigning to `value`.
 
 ## Checks
 

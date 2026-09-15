@@ -30,3 +30,5 @@ browser sources and output emitters at the edges.
 - Add tests for contract and safety invariants.
 - Run `gofmt`, `go test ./...`, and `go vet ./...` for Go changes.
 - Keep the JSON Schema synchronized with Go DTOs.
+
+Keep changes aligned with `docs/product-spec.md` and accepted ADRs.

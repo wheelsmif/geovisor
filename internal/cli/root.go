@@ -184,9 +184,9 @@ func newInspectCommand(stdout, stderr io.Writer, dependencies Dependencies) *cob
 	}
 
 	flags := command.Flags()
-	flags.StringVarP(&options.Format, "format", "f", options.Format, "output format: tir, mcp, openai, or all")
+	flags.StringVarP(&options.Format, "format", "f", options.Format, "output format: tir, tir-json, mcp, openai, or all")
 	flags.StringVarP(&options.Output, "output", "o", "", "output file, or output directory with --format all")
-	flags.StringVar(&options.BindingsOutput, "bindings-output", "", "MCP/OpenAI executable bindings file")
+	flags.StringVar(&options.BindingsOutput, "bindings-output", "", "MCP/OpenAI binding recipes file")
 	flags.BoolVar(&options.OpenAIStrict, "openai-strict", false, "emit strict schemas for the OpenAI artifact only")
 	flags.DurationVar(&options.Timeout, "timeout", options.Timeout, "overall browser operation timeout")
 	flags.DurationVar(&options.DOMQuiet, "dom-quiet", options.DOMQuiet, "required DOM quiet period")
@@ -237,7 +237,7 @@ func validateInspectInvocation(command *cobra.Command, args []string, options *i
 	}
 
 	switch options.Format {
-	case "tir":
+	case "tir", "tir-json":
 		options.selectedFormat = emitter.FormatTIRJSON
 	case "mcp":
 		options.selectedFormat = emitter.FormatMCP
@@ -246,7 +246,7 @@ func validateInspectInvocation(command *cobra.Command, args []string, options *i
 	case "all":
 		options.all = true
 	default:
-		return usagef("unsupported --format %q (want tir, mcp, openai, or all)", options.Format)
+		return usagef("unsupported --format %q (want tir, tir-json, mcp, openai, or all)", options.Format)
 	}
 
 	if options.all && strings.TrimSpace(options.Output) == "" {
@@ -480,7 +480,7 @@ func writeSingleOutput(
 		} else {
 			if _, err := fmt.Fprintln(
 				stderr,
-				"warning: executable bindings were not persisted; use --bindings-output",
+				"warning: binding recipes were not persisted; use --bindings-output",
 			); err != nil {
 				return classify(ExitOutput, fmt.Errorf("write bindings warning: %w", err))
 			}

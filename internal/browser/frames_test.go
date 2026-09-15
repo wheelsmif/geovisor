@@ -774,6 +774,34 @@ func TestExtractionEvaluateReasonDistinguishesTimeout(t *testing.T) {
 	}
 }
 
+func TestOOPIFWaitSatisfied(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name        string
+		expected    int
+		childFrames int
+		want        bool
+	}{
+		{name: "none expected", expected: 0, childFrames: 0, want: true},
+		{name: "all children present", expected: 2, childFrames: 2, want: true},
+		{name: "extra children", expected: 1, childFrames: 2, want: true},
+		{name: "first of two late OOPIFs", expected: 2, childFrames: 1, want: false},
+		{name: "none arrived", expected: 2, childFrames: 0, want: false},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := oopifWaitSatisfied(test.expected, test.childFrames); got != test.want {
+				t.Fatalf(
+					"oopifWaitSatisfied(%d, %d) = %v, want %v",
+					test.expected, test.childFrames, got, test.want,
+				)
+			}
+		})
+	}
+}
+
 func TestOriginForURLRejectsUnusableURLs(t *testing.T) {
 	t.Parallel()
 

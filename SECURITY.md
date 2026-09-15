@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Security fixes are applied to the latest released version and the current
-development branch. Older releases may not receive backports.
+Security fixes are applied to current `main` and to the latest git tag when
+one exists. There is no numbered release today.
 
 ## Reporting a vulnerability
 

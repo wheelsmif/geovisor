@@ -3,8 +3,8 @@
 ## Purpose
 
 GEO-Visor converts browser-observed interfaces into a canonical, deterministic
-Tool Intermediate Representation (TIR). Separate emitters will translate TIR to
-MCP or OpenAI tool formats.
+Tool Intermediate Representation (TIR). Separate emitters translate TIR to MCP
+or OpenAI tool formats.
 
 ## Product boundaries
 

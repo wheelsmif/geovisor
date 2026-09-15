@@ -25,6 +25,10 @@ browser`, `attention required`, `access denied`, `captcha`, `unusual traffic`).
 It is not a classifier. A match is a non-fatal diagnostic; extraction still
 runs. The phrase list is not expanded without a dedicated review.
 
+Launch discovery uses go-rod's Chromium search, then well-known Windows paths
+for Chrome, Chromium, and Edge (`Microsoft\Edge\Application\msedge.exe`) when
+that search misses. `--browser-executable` / `ExecutablePath` still wins.
+
 ## Launch process policy
 
 Every GEO-Visor-owned launch explicitly calls `Leakless(false)`. This avoids

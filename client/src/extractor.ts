@@ -35,6 +35,7 @@ import {
 } from "./shared/limits";
 import { GENERIC_ROLE, isContentEditable, semanticRole } from "./shared/role";
 import { semanticMatches } from "./shared/locate";
+import { isCitationFragment, isLowValueName } from "./shared/low-value";
 import { accessibleName, type NameSource } from "./shared/name";
 import { optionLabels } from "./shared/option";
 
@@ -550,12 +551,6 @@ function isAction(element: Element): boolean {
   return ACTION_ROLES.has(explicitRole(element));
 }
 
-const CITATION_MARK = /^\[\d+\]$/u;
-const DOI_NAME =
-  /^(?:doi:\s*)?(?:https?:\/\/(?:dx\.)?doi\.org\/)?10\.\d{4,}\/\S+$/iu;
-const BARE_RFC_OR_DOI = /^(?:doi|rfc\s*\d+)$/iu;
-const CITATION_FRAGMENT = /#(?:cite_note|cite_ref|footnote|fn)(?:[-_.:\d]|$)/iu;
-
 function isCitationHref(element: Element): boolean {
   const href = element.getAttribute("href");
   if (!href) return false;
@@ -575,7 +570,7 @@ function isCitationHref(element: Element): boolean {
       return false;
     }
   }
-  return sameDocument && CITATION_FRAGMENT.test(fragment);
+  return sameDocument && isCitationFragment(fragment);
 }
 
 /** Citation marks, DOI/RFC tokens, same-document cite fragments, and unnamed links. */
@@ -583,8 +578,7 @@ function isLowValueAction(element: Element): boolean {
   if (isCitationHref(element)) return true;
   const role = semanticRole(element) || GENERIC_ROLE;
   const name = accessibleName(element, role)?.text ?? "";
-  if (role === "link" && name === "") return true;
-  return CITATION_MARK.test(name) || DOI_NAME.test(name) || BARE_RFC_OR_DOI.test(name);
+  return isLowValueName(name, role);
 }
 
 function isFormAssociated(element: Element): boolean {

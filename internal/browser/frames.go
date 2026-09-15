@@ -91,7 +91,7 @@ func observeTarget(
 	if err != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
 		return result, operationError(ctx, ErrorFrameDiscovery, "frames.tree", "read browser frame tree", err)
 	}
-	waitForMissingOOPIFs(ctx, browser, rootSession, tree.FrameTree, options.quietTimeout)
+	waitForMissingOOPIFs(ctx, rootSession, tree.FrameTree, options.quietTimeout)
 	tree, err = (proto.PageGetFrameTree{}).Call(rootSession)
 	if err != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
 		return result, operationError(ctx, ErrorFrameDiscovery, "frames.tree", "read browser frame tree", err)
@@ -154,7 +154,6 @@ func observeTarget(
 
 func waitForMissingOOPIFs(
 	ctx context.Context,
-	browser *rod.Browser,
 	session *sessionClient,
 	tree *proto.PageFrameTree,
 	limit time.Duration,
@@ -164,10 +163,37 @@ func waitForMissingOOPIFs(
 	if tree != nil {
 		have = len(tree.ChildFrames)
 	}
-	if expected <= have {
+	if oopifWaitSatisfied(expected, have) || session == nil {
 		return
 	}
-	waitForIFrameTargets(ctx, browser, limit)
+	if limit <= 0 {
+		limit = DefaultDOMQuietLimit
+	}
+	deadline := time.Now().Add(limit)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		refetched, err := (proto.PageGetFrameTree{}).Call(session)
+		if err == nil && refetched != nil && refetched.FrameTree != nil &&
+			oopifWaitSatisfied(expected, len(refetched.FrameTree.ChildFrames)) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// oopifWaitSatisfied reports whether Page.getFrameTree child frames cover the
+// iframe/frame elements already counted in the pierced DOM. A timeout still
+// falls through to uncovered-frame reporting.
+func oopifWaitSatisfied(expected, childFrames int) bool {
+	return childFrames >= expected
 }
 
 func countFrameElements(node *proto.DOMNode) int {
@@ -189,36 +215,6 @@ func countFrameElements(node *proto.DOMNode) int {
 		total += countFrameElements(shadow)
 	}
 	return total
-}
-
-func waitForIFrameTargets(ctx context.Context, browser *rod.Browser, limit time.Duration) {
-	if browser == nil {
-		return
-	}
-	if limit <= 0 {
-		limit = DefaultDOMQuietLimit
-	}
-	deadline := time.Now().Add(limit)
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		targets, err := (proto.TargetGetTargets{}).Call(browser.Context(ctx))
-		if err == nil {
-			for _, target := range targets.TargetInfos {
-				if target != nil && string(target.Type) == "iframe" {
-					return
-				}
-			}
-		}
-		if !time.Now().Before(deadline) {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }
 
 func sessionMainFrameID(session *sessionClient) (proto.PageFrameID, error) {
