@@ -17,10 +17,9 @@ import (
 	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
-// The round-trip harness closes the loop the review found missing (GV-036). The
-// extractor and apply-runtime share client/src/shared/ for role resolution,
-// accessible-name computation, and element addressing. Tests compile TIR and
-// apply it against the same DOM the observation came from.
+// The round-trip harness compiles TIR and applies it against the same DOM the
+// observation came from. The extractor and apply-runtime share client/src/shared/
+// for role resolution, accessible-name computation, and element addressing.
 const roundTripDriver = "client/test/apply-roundtrip.mjs"
 
 // roundTripInputs are the files the Node driver reads. The Go test cache tracks
@@ -125,11 +124,6 @@ func toolSlug(id string) string {
 	return id
 }
 
-// Phase 1 introduced a knownFailure helper so these tests could assert correct
-// behavior while the findings they described were still open. Every one is now
-// closed, so the helper is gone; staticcheck would flag it as dead code, which
-// is the outcome the phase was aiming for.
-
 func TestApplyRuntimeResolvesAgainstOriginatingDOM(t *testing.T) {
 	_, report := runRoundTrip(t, fixturePath, nil)
 
@@ -167,17 +161,16 @@ func TestApplyRuntimeResolvesAgainstOriginatingDOM(t *testing.T) {
 }
 
 func TestApplyRuntimeSelectAppliesAdvertisedOption(t *testing.T) {
-	// GV-001: the extractor advertises option labels while the runtime assigns
-	// the advertised string to element.value, so every <select> whose option
-	// values differ from their visible text yields a permanently broken tool.
+	// The extractor advertises option labels, and the runtime must select by
+	// that same label. Assigning the advertised string to element.value breaks
+	// every <select> whose option values differ from their visible text.
 	//
-	// Note for the fix: forms.html option values are sensitive sentinels that
-	// pipeline tests assert never reach an artifact, so the repair cannot be
-	// "emit the option value". The runtime has to select by the same label it
-	// advertises.
+	// forms.html option values are sensitive sentinels that pipeline tests
+	// assert never reach an artifact, so the runtime cannot emit or assign the
+	// option value. It has to select by the advertised label.
 	//
-	// The fixture's <select> is owned by a form, so since GV-007 it is reached
-	// as a parameter of the form tool rather than as a standalone tool.
+	// The fixture's <select> is owned by a form, so it is reached as a
+	// parameter of the form tool rather than as a standalone tool.
 	_, report := runRoundTrip(t, fixturePath, nil)
 
 	tool := report.bySlug(t, "profile-form")
@@ -196,8 +189,8 @@ func TestApplyRuntimeSelectAppliesAdvertisedOption(t *testing.T) {
 			t.Fatalf("select %q has no selected option after execution", tool.Name)
 		}
 		// The selection must land on the option carrying the advertised label.
-		// Asserting the label, not the value, is the point of GV-001: option
-		// values never leave the page, so the label is the only shared key.
+		// Option values never leave the page, so the label is the only shared
+		// key.
 		if state.SelectedLabel != requested {
 			t.Fatalf(
 				"select %q requested %q but selected option is labelled %q",
@@ -210,15 +203,14 @@ func TestApplyRuntimeSelectAppliesAdvertisedOption(t *testing.T) {
 }
 
 func TestApplyRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
-	// GV-003 and GV-004 both fail by silently degrading to the CSS fallback:
-	// the semantic strategy never matches, the runtime swallows the failure,
-	// and a passing tool hides a broken locator. Removing the CSS fallback
-	// leaves the semantic strategy as the only strategy, which makes that
-	// degradation observable without adding test hooks to generated code.
+	// Without a CSS fallback, a semantic locator that does not match fails
+	// instead of silently resolving to the wrong element. Removing the CSS
+	// fallback leaves the semantic strategy as the only strategy, which makes
+	// that degradation observable without adding test hooks to generated code.
 	//
-	// This is also how GV-049 was found: the runtime's role table is a strict
-	// subset of the extractor's, so locators scoped by details, fieldset, nav,
-	// dialog, or summary can never match.
+	// The runtime's role table must match the extractor's. Locators scoped by
+	// details, fieldset, nav, dialog, or summary never match if the runtime
+	// table is a strict subset.
 	_, report := runRoundTrip(t, fixturePath, stripCSSFallbacks)
 
 	if report.ApplyError != "" {
@@ -235,13 +227,7 @@ func TestApplyRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
 	}
 }
 
-// TestApplyRuntimeResolvesIdenticalNamesToDistinctElements is GV-004's real
-// acceptance criterion. The semantic-only test above only proves each locator
-// resolves to *something*; three tools all resolving to the same element would
-// satisfy it. The fixture has three textboxes named "Query", two of them in one
-// scope, so distinctness is what separates a working ordinal from a locator
-// that always returns the first match.
-// TestApplyRuntimeDoesNotRegisterStandaloneFormControls is GV-007. A control
+// TestApplyRuntimeDoesNotRegisterStandaloneFormControls asserts that a control
 // owned by a form is a parameter of that form's tool. Registering it again as
 // its own tool gives an agent two ways to fill one field and no basis for
 // choosing. Submit buttons stay standalone: they are actions, not parameters.
@@ -279,6 +265,13 @@ func countSlugsWithPrefix(report roundTripReport, prefix string) int {
 	return count
 }
 
+// TestApplyRuntimeResolvesIdenticalNamesToDistinctElements asserts that
+// identically named tools resolve to distinct elements. The semantic-only test
+// above only proves each locator resolves to something; three tools all
+// resolving to the same element would satisfy it. The fixture has three
+// textboxes named "Query", two of them in one scope, so distinctness is what
+// separates a working ordinal from a locator that always returns the first
+// match.
 func TestApplyRuntimeResolvesIdenticalNamesToDistinctElements(t *testing.T) {
 	_, report := runRoundTrip(t, fixturePath, stripCSSFallbacks)
 
@@ -318,17 +311,17 @@ func TestApplyRuntimeResolvesIdenticalNamesToDistinctElements(t *testing.T) {
 	}
 }
 
-// TestApplyRuntimeResolvesFramePathsToTheCorrectFrame covers GV-003.
+// TestApplyRuntimeResolvesFramePathsToTheCorrectFrame asserts that two tools
+// that differ only in frame path resolve to the matching frame.
 //
-// The fixture is the case both halves of the old frame locator got wrong: two
-// wrappers each holding one identical, unnamed frame. A selector counting
-// element siblings gives both frames position 1, and a name comparison has
-// nothing to compare, so resolution returned the first frame in the document
-// for both tools -- silently, because the wrong element resolved successfully.
+// The fixture has two wrappers each holding one identical, unnamed frame. A
+// selector counting element siblings gives both frames the same position, and
+// a name comparison has nothing to compare, so a name-or-CSS locator would
+// resolve both tools to the first frame in the document.
 //
-// The two tools differ *only* in their frame path, and their locators carry the
-// same role and name, so reaching the right input proves the frame path did the
-// work.
+// The two tools differ only in their frame path, and their locators carry the
+// same role and name, so reaching the right input proves the frame path did
+// the work.
 func TestApplyRuntimeResolvesFramePathsToTheCorrectFrame(t *testing.T) {
 	document, report := runRoundTrip(t, "testdata/corpus/frames.html", stripCSSFallbacks)
 

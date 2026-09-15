@@ -1,4 +1,4 @@
-// The single <select> option-label implementation (GV-001).
+// The single <select> option-label implementation.
 //
 // The extractor advertises visible option labels rather than option values,
 // because option values are page data that must not leave the page. The runtime

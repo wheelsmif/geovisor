@@ -65,8 +65,8 @@ func chooseTarget(
 	if err != nil {
 		return nil, err
 	}
-	// Never attach to a tab to ask whether it has focus (GV-011). Selection
-	// uses only Target.getTargets plus the caller's explicit selector.
+	// Never attach to a tab to ask whether it has focus. Selection uses only
+	// Target.getTargets plus the caller's explicit selector.
 	return selectTarget(response.TargetInfos, selector)
 }
 

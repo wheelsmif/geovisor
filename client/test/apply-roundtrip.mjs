@@ -22,7 +22,7 @@ import {
 } from "./helpers.mjs";
 
 const FIXTURE_URL = "https://roundtrip.example/";
-const STRING_INPUT = "GV-ROUNDTRIP";
+const STRING_INPUT = "roundtrip-fill";
 
 const [mode, fixturePath, tirPath] = process.argv.slice(2);
 if (mode !== "extract" && mode !== "execute") {

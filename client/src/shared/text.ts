@@ -9,7 +9,7 @@ export const DESCRIPTION_LIMIT = 512;
  * Collapses whitespace, trims, and bounds a page-derived string.
  *
  * The limit is applied in code points rather than UTF-16 code units so a
- * surrogate pair is never split (GV-032).
+ * surrogate pair is never split.
  */
 export function cleanText(value: string | null | undefined, limit = TEXT_LIMIT): string {
   if (!value) return "";

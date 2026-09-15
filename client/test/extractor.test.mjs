@@ -134,7 +134,7 @@ test("safe exploration opens details without clicks, submits, navigation, or fet
   assert.ok(interactions(batch, "action").some((action) => action.name === "Apply"));
 });
 
-// GV-009. A microtask yield never ran toggle handlers. A macrotask does, so a
+// A microtask yield never ran toggle handlers. A macrotask does, so a
 // details whose body is populated on toggle is visible to the second traverse.
 test("safe exploration yields revealed controls from a toggle handler", async () => {
   const dom = page("<details><summary>Advanced</summary></details>", (window) => {
@@ -156,7 +156,7 @@ test("safe exploration yields revealed controls from a toggle handler", async ()
   assert.ok(interactions(batch, "control").some((control) => control.name === "Revealed field"));
 });
 
-// GV-010. Depth 0 is no exploration. The operations cap is a separate budget.
+// Depth 0 is no exploration. The operations cap is a separate budget.
 test("safe exploration treats depth 0 as no exploration", async () => {
   const dom = page(`
     <details><summary>One</summary><button>First</button></details>
@@ -248,7 +248,7 @@ test("safe exploration enforces the time budget independently of operations", as
   );
 });
 
-// GV-018. A document-wide traversal index in the fallback name would shift
+// A document-wide traversal index in the fallback name would shift
 // every downstream tool ID when an unrelated earlier element is inserted.
 test("positional fallback names do not enter identity or locators", async () => {
   const extractUnnamed = async (prefix) => {
@@ -373,9 +373,9 @@ test("classifies submission only for controls associated with a form", async () 
   assert.equal(submit.actions[0].sideEffect.class, "submission");
 });
 
-// GV-002. Hiding is inherited, but only `visibility` is an inherited CSS
-// property: a descendant of a `display: none` wrapper still reports its own
-// `display`, so an element-local check cannot see it.
+// Hiding is inherited, but only `visibility` is an inherited CSS property: a
+// descendant of a `display: none` wrapper still reports its own `display`, so
+// an element-local check cannot see it.
 test("excludes controls hidden by an ancestor, not just by themselves", async () => {
   const dom = page(`
     <div style="display:none"><input aria-label="Under display none"></div>
@@ -409,10 +409,10 @@ test("honors a visibility:visible override inside a hidden ancestor", async () =
   );
 });
 
-// GV-007. A control owned by a form is a parameter of the form's tool, so
-// emitting it standalone as well would give an agent two ways to fill one field
-// and no basis for choosing. Submit buttons stay standalone: they are actions
-// rather than parameters, and the form tool requires every required parameter.
+// A control owned by a form is a parameter of the form's tool, so emitting it
+// standalone as well would give an agent two ways to fill one field and no
+// basis for choosing. Submit buttons stay standalone: they are actions rather
+// than parameters, and the form tool requires every required parameter.
 test("emits form-owned controls only as form parameters", async () => {
   const dom = page(`
     <form aria-label="Profile">
@@ -473,7 +473,7 @@ test("claims controls associated with a form by attribute", async () => {
   );
 });
 
-// GV-005. `hasAttribute("contenteditable")` is true for the string "false".
+// `hasAttribute("contenteditable")` is true for the string "false".
 test("treats contenteditable as editable only when its value says so", async () => {
   const dom = page(`
     <div contenteditable="false" aria-label="Not editable"></div>
@@ -490,7 +490,7 @@ test("treats contenteditable as editable only when its value says so", async () 
   );
 });
 
-// GV-030. A throw while building one interaction is isolated and counted.
+// A throw while building one interaction is isolated and counted.
 test("reports a warning when a suppressed DOM read fails", async () => {
   const dom = page(`<input aria-label="Visible">`);
   const input = dom.window.document.querySelector("input");
@@ -549,8 +549,7 @@ test("repeated extraction is deterministic", async () => {
   assert.equal(second, first);
 });
 
-// GV-032. The 80-character cap used to apply only when the name did not start
-// with a digit, so numeric labels were unbounded.
+// The 80-character cap applies even when the name starts with a digit.
 test("caps parameter names that start with a digit", async () => {
   const label = `1${"a".repeat(90)}`;
   const dom = page(`<input aria-label="${label}">`);
@@ -560,9 +559,8 @@ test("caps parameter names that start with a digit", async () => {
   assert.match(name, /^value1/u);
 });
 
-// GV-032. Bounding by UTF-16 code units can split a surrogate pair. 255 BMP
-// characters plus an emoji is 256 code points and 257 UTF-16 units; the emoji
-// must survive.
+// Bounding by UTF-16 code units can split a surrogate pair. 255 BMP characters
+// plus an emoji is 256 code points and 257 UTF-16 units; the emoji must survive.
 test("does not split a surrogate pair when bounding page text", async () => {
   const label = `${"x".repeat(255)}\u{1F600}`;
   const dom = page(`<input aria-label="${label}">`);
@@ -570,7 +568,7 @@ test("does not split a surrogate pair when bounding page text", async () => {
   assert.equal(interactions(batch, "control")[0].name, label);
 });
 
-// GV-032. `explicitRole` already maps role="search"; a second branch was
+// `explicitRole` already maps role="search"; a second branch would be
 // unreachable. The form still records search rather than falling through to
 // the "form" default.
 test("records an explicit search role on a form", async () => {

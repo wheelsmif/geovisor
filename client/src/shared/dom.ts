@@ -22,7 +22,7 @@ let readFailureHook: ReadFailureHook | undefined;
 /**
  * Counts `read` failures for the duration of `fn`, then restores the previous
  * hook. Finder timeouts and other expected degradations should use
- * `readExpected` so they are not counted as coverage gaps (GV-030).
+ * `readExpected` so they are not counted as coverage gaps.
  */
 export function beginReadAccounting(): () => number {
   let failures = 0;
@@ -97,8 +97,8 @@ function lookupRoot(element: Element): Document | ShadowRoot | null {
 /**
  * Reports whether the element is an editable host.
  *
- * `hasAttribute("contenteditable")` is true for the string "false" (GV-005), so
- * the attribute value is what decides.
+ * `hasAttribute("contenteditable")` is true for the string "false", so the
+ * attribute value is what decides.
  */
 export function isContentEditable(element: Element): boolean {
   const value = element.getAttribute("contenteditable");
@@ -112,7 +112,7 @@ export function isContentEditable(element: Element): boolean {
  *
  * Accessible-name computation does not include the contents of embedded
  * controls. `textarea.textContent` is the current value, so treating it as
- * name text leaked drafts and PII (P20).
+ * name text leaked drafts and PII.
  */
 function isValueBearingControl(element: Element): boolean {
   const tag = element.localName;

@@ -42,7 +42,7 @@ type discoveredFrame struct {
 	path    []observation.FrameReference
 	session *sessionClient
 	// reason, when set, marks the frame uncovered without extracting tools.
-	// Closed-shadow-hosted frames are page-JS-unaddressable (P7, P9).
+	// Closed-shadow-hosted frames are page-JS-unaddressable.
 	reason string
 }
 
@@ -392,7 +392,7 @@ func attachOOPIFSessions(
 
 // discoverOOPIFs attaches descendant iframe targets, refetching the target list
 // after each successful attach so nested OOPIFs created by that attach can
-// enter a later pass (P8).
+// enter a later pass.
 func discoverOOPIFs(
 	rootTargetID proto.TargetTargetID,
 	rootTree *proto.PageFrameTree,
@@ -780,15 +780,15 @@ func pierceIncomplete(root *proto.DOMNode) bool {
 
 // collectFrameOwnerOrder walks a pierced DOM tree and records each document's
 // child frames in the order a page-JS walk would see them. Extracted from the
-// CDP call so the ordering contract can be tested without a browser (GV-037).
+// CDP call so the ordering contract can be tested without a browser.
 //
 // The walk is the Go counterpart of `frameCandidates` in client/src/shared/locate.ts:
 // pre-order, light children before open-shadow content, localName iframe|frame
 // (not computed role), and no descent past a frame, whose contents belong to a
 // different document. Closed shadow trees are skipped so they do not consume an
-// index the page-JS walk cannot see (P9). The two implementations are what keep
+// index the page-JS walk cannot see. The two implementations keep
 // FrameReference.Index and a runtime frame path node pointing at the same
-// element (GV-003).
+// element.
 func collectFrameOwnerOrder(target map[proto.PageFrameID][]proto.PageFrameID, root *proto.DOMNode) {
 	if root == nil {
 		return
@@ -1081,7 +1081,7 @@ func closedShadowHostLabel(node *proto.DOMNode) string {
 //
 // A frame is addressed by its position among the containing document's frames,
 // which is what FrameReference.Index records and what mergeFrameOwnerOrder
-// numbers. Two things follow, and getting both wrong is GV-003:
+// numbers. Two things follow:
 //
 // No CSS fallback. `:nth-child(N of iframe, frame)` counts among element
 // siblings, not among a document's frames, so on two single-frame wrappers

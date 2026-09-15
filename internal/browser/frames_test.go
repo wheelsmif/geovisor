@@ -13,11 +13,8 @@ import (
 	"github.com/wheelsmif/geovisor/internal/pageurl"
 )
 
-// These cover the live frame-tree functions. The one function that had a test
-// was the dead one, which is why GV-003 survived in code that looked covered
-// (GV-037). The functions needing a CDP session are exercised through their
-// session-free paths; end-to-end frame resolution is asserted by executing the
-// emitted module in internal/integration.
+// Session-free frame-tree helpers are tested here. CDP-backed paths are
+// covered in internal/integration.
 
 func TestFrameTraversalNodesAddressFramesByIndexAlone(t *testing.T) {
 	t.Parallel()
@@ -201,9 +198,9 @@ func TestFlattenCompleteFrameTreeIncludesOutOfProcessFrames(t *testing.T) {
 func TestCollectFrameOwnerOrderNumbersSiblingFramesInDocumentOrder(t *testing.T) {
 	t.Parallel()
 
-	// Two single-frame wrappers: the GV-003 case. Counting among element
-	// siblings would give both frames position 0. Counting among the
-	// document's frames gives 0 then 1.
+	// Two single-frame wrappers. Counting among element siblings would give
+	// both frames position 0. Counting among the document's frames gives 0
+	// then 1.
 	root := &proto.DOMNode{
 		FrameID: "root",
 		Children: []*proto.DOMNode{{

@@ -8,7 +8,7 @@ import (
 )
 
 // PageURL keeps scheme, host, and path and drops query and fragment so tokens
-// in iframe src and source URLs cannot enter TIR (P12). Internal whitespace is
+// in iframe src and source URLs cannot enter TIR. Internal whitespace is
 // collapsed the same way compiler text is cleaned.
 func PageURL(raw string) string {
 	trimmed := strings.Join(strings.Fields(raw), " ")

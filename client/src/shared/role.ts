@@ -1,12 +1,7 @@
-// The single role-resolution implementation (GV-049).
-//
-// This used to exist twice: once here for the extractor and once as a copy
-// in the apply path. The runtime copy knew fewer elements
-// than the extractor, so locators scoped by <details>, <fieldset>, <nav>,
-// <dialog>, <summary>, or a heading could never match and degraded silently to
-// the CSS fallback. Producer and consumer now resolve roles through this
-// function, which makes that class of divergence impossible rather than merely
-// tested.
+// Role resolution shared by the extractor and the apply runtime.
+// Both sides must classify the same elements the same way, or locators scoped
+// by <details>, <fieldset>, <nav>, <dialog>, <summary>, or a heading miss and
+// degrade silently to the CSS fallback.
 
 import { explicitRole, inputType, isContentEditable } from "./dom";
 

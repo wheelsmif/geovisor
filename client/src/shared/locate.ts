@@ -52,8 +52,8 @@ function candidates(root: Root): Element[] {
 /**
  * The frames of one document, in the order the browser source numbers them.
  *
- * A frame is addressed by its index among the containing document's frames
- * (GV-003), and that index cannot be expressed as a CSS selector: `:nth-child`
+ * A frame is addressed by its index among the containing document's frames,
+ * and that index cannot be expressed as a CSS selector: `:nth-child`
  * counts among element siblings, so two single-frame wrappers both answer to
  * index 0. It also cannot use the ordinary element scan, which does not enter
  * shadow roots, because a frame hosted in a shadow root is still one of its
@@ -85,10 +85,10 @@ export function frameCandidates(root: Root): Element[] {
 /**
  * Finds the elements in `elements` matching a semantic node.
  *
- * A single pass computes role and name once per element (GV-035); the previous
- * runtime rescanned the subtree and recomputed accessible names for every
- * element once per scope node per resolution attempt. Scope hops still scan
- * the *new* root — the matched ancestor — because that is a different tree.
+ * A single pass computes role and name once per element. Rescanning the
+ * subtree and recomputing accessible names for every element once per scope
+ * node per resolution attempt is avoided. Scope hops still scan the *new*
+ * root — the matched ancestor — because that is a different tree.
  * Per-action memoization is rejected: apply mutates the DOM between tools.
  */
 function matchIn(elements: Element[], node: SemanticNode): Element[] {
@@ -188,9 +188,9 @@ function resolvePathNode(root: Root, node: PathNode): Element {
  *
  * Frames get their own resolver because they are addressed differently: by
  * position among the containing document's frames rather than by a match within
- * an element scan. Routing them through the ordinary path-node resolver is what
- * made GV-003 silent -- an unmatched semantic half fell through to a CSS
- * fallback that counted the wrong thing and returned the wrong frame.
+ * an element scan. Routing them through the ordinary path-node resolver would
+ * let an unmatched semantic half fall through to a CSS fallback that counted
+ * the wrong thing and returned the wrong frame.
  */
 function resolveFrameNode(root: Root, node: PathNode): Element {
   const failures: string[] = [];

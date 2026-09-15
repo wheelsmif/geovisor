@@ -577,7 +577,7 @@ func compileParameters(accumulator *toolAccumulator, warnings *[]pendingWarning)
 
 // locatorIDs is the single derivation of locator IDs for a tool. compileLocators
 // and compileActions share the map so an action cannot name an ID that was
-// never assigned (GV-021).
+// never assigned.
 func locatorIDs(accumulator *toolAccumulator, toolID string) map[string]string {
 	keys := sortedMapKeys(accumulator.locators)
 	return stableIDs(keys, func(key string) string {

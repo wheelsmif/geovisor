@@ -30,7 +30,7 @@ inspection output.
 
 `UPDATE_GOLDEN=1` refreshes compiler goldens (`internal/compiler`) and emitter
 goldens (`internal/emitter`). Use it only when the contract change is
-intentional. There is no `webmcp.golden`.
+intentional.
 
 ## Design constraints
 
@@ -79,8 +79,8 @@ checksums run in the Source cross-build job. Chromium-backed packages also run
 in the dedicated Browser job, which asserts `google-chrome --version` first.
 
 Browser CI uses the Chrome binary that ships on the GitHub-hosted runner image
-on purpose. This pass does not add a third-party `setup-chrome` action: pinning
-a downloaded browser would add supply-chain surface the project is not taking.
+on purpose. Do not add a third-party `setup-chrome` action: pinning a downloaded
+browser would add supply-chain surface the project is not taking.
 The `google-chrome --version` step is required so a missing image browser fails
 loudly instead of skipping. Chrome version drift across runner images is an
 accepted risk; record a fixture or protocol break against a specific version

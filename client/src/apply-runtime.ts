@@ -239,8 +239,8 @@ function applyFill(element: Element, value: unknown): void {
  * The extractor advertises visible option labels, never option values, because
  * option values are page data that must not leave the page. Assigning the
  * advertised label to `element.value` therefore fails on every <select> whose
- * values differ from its text (GV-001); matching the label and setting
- * `selectedIndex` keeps one source of truth for both.
+ * values differ from its text; matching the label and setting `selectedIndex`
+ * keeps one source of truth for both.
  */
 function applySelect(element: Element, value: unknown): void {
   if (element.localName !== "select") {

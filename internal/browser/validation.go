@@ -222,7 +222,7 @@ func sanitizeText(value string, secrets ...string) string {
 				for _, item := range values {
 					// Single-character and two-character values are not secrets
 					// worth scanning for; replacing them shreds ordinary
-					// diagnostics (GV-006).
+					// diagnostics.
 					if len(item) >= 3 {
 						value = strings.ReplaceAll(value, item, "[redacted]")
 					}

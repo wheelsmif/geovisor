@@ -39,7 +39,7 @@ import { isCitationFragment, isLowValueName } from "./shared/low-value";
 import { accessibleName, type NameSource } from "./shared/name";
 import { optionLabels } from "./shared/option";
 
-/** Per-call @medv/finder budget. Exhaustion falls back to simpleSelector (GV-033). */
+/** Per-call @medv/finder budget. Exhaustion falls back to simpleSelector. */
 const FINDER_TIMEOUT_MS = 50;
 
 /** Custom widgets the runtime can operate as a click, not a native apply. */
@@ -120,12 +120,13 @@ function normalizeOptions(options: ExtractionOptions | undefined): NormalizedOpt
 /**
  * Reports whether an element hides everything inside it, not just itself.
  *
- * `display: none` is the reason GV-002 needed an ancestor walk at all: it is not
- * reflected in a descendant's computed style, because only the *used* value is
- * affected, so a descendant of a `display: none` wrapper still reports its own
- * `display`. The `hidden` attribute resolves to `display: none` through the UA
- * stylesheet, and `aria-hidden="true"` hides the whole subtree from the
- * accessibility tree, with `aria-hidden="false"` on a descendant not undoing it.
+ * `display: none` is not reflected in a descendant's computed style, because
+ * only the *used* value is affected, so a descendant of a `display: none`
+ * wrapper still reports its own `display`. Hiding is therefore inherited by
+ * walking ancestors rather than checking each element in isolation. The
+ * `hidden` attribute resolves to `display: none` through the UA stylesheet,
+ * and `aria-hidden="true"` hides the whole subtree from the accessibility
+ * tree, with `aria-hidden="false"` on a descendant not undoing it.
  */
 function hidesSubtree(element: Element): boolean {
   if (
@@ -171,7 +172,7 @@ function isHiddenLocally(element: Element): boolean {
  * derives the same name when it looks the element up again. Only the positional
  * fallback is local: it depends on a document-wide traversal counter the runtime
  * cannot know, so it is a parameter-name hint and never a match key or tool
- * identity (GV-018).
+ * identity.
  */
 function labelFor(element: Element, role: string, fallbackIndex: number): LabelResult {
   const derived = accessibleName(element, role);
@@ -280,9 +281,9 @@ function pathNode(element: Element, sourceOrder: number): PathNode {
  * hidden.
  *
  * This is a depth-first child walk rather than a flat `querySelectorAll("*")`
- * scan so that hiding can be inherited from ancestors (GV-002) and across
- * shadow boundaries: a hidden host hides its shadow tree. `sourceOrder` is a
- * parameter-ordering hint only; tool identity does not read it (GV-018).
+ * scan so that hiding can be inherited from ancestors and across shadow
+ * boundaries: a hidden host hides its shadow tree. `sourceOrder` is a
+ * parameter-ordering hint only; tool identity does not read it.
  */
 function traverse(root: Document | ShadowRoot): ElementRecord[] {
   const records: ElementRecord[] = [];
@@ -386,16 +387,15 @@ function locatorFor(record: ElementRecord, role: string, name?: string): Locator
 /**
  * Builds a semantic locator, but only one that resolves back to `element`.
  *
- * The check runs the shared matcher the runtime will run. Recording an
- * unverified locator is how GV-003, GV-004, and GV-049 all failed: the
- * semantic strategy silently missed, the runtime fell through to the CSS
- * fallback, and nothing reported that the precise strategy was dead. An
- * unverifiable locator now records no semantic half at all, which is honest and
- * leaves the CSS fallback as the only claim.
+ * The check runs the shared matcher the runtime will run. An unverified
+ * locator would let the semantic strategy miss silently, the runtime fall
+ * through to the CSS fallback, and nothing report that the precise strategy
+ * was dead. An unverifiable locator records no semantic half at all, which is
+ * honest and leaves the CSS fallback as the only claim.
  *
  * When more than one element matches, the element's index within the match set
- * is recorded. That is the replacement for mutating the name into something
- * unique -- a mutated name matches nothing (GV-004).
+ * is recorded. Mutating the name into something unique is not an option: a
+ * mutated name matches nothing.
  */
 function verifiedSemantic(
   element: Element,
@@ -789,10 +789,10 @@ interface OpenedDetails {
  * Opens eligible `<details>` so a later traverse can see revealed controls.
  *
  * The caller must invoke `restore` after that traverse (and on any failure)
- * so attach mode does not leave a live tab mutated (GV-008). Opening is
- * bounded by depth, operations, and a real deadline across the yields
- * (GV-009, GV-010). `--depth 0` is no exploration: a top-level `<details>`
- * has depth 0, so the guard is `depth < maxDepth`.
+ * so attach mode does not leave a live tab mutated. Opening is bounded by
+ * depth, operations, and a real deadline across the yields. `--depth 0` is
+ * no exploration: a top-level `<details>` has depth 0, so the guard is
+ * `depth < maxDepth`.
  */
 async function exploreSafely(
   records: ElementRecord[],
@@ -871,8 +871,8 @@ function disambiguateInteractions(interactions: Interaction[]): void {
       // Only the display name is disambiguated. The locator keeps the name the
       // element actually carries, because that is the only name the runtime can
       // recompute; ambiguity is resolved by the ordinal in the semantic locator
-      // instead (GV-004). Positional fallbacks leave name empty so they are
-      // not rewritten into a document-wide index (GV-018).
+      // instead. Positional fallbacks leave name empty so they are not
+      // rewritten into a document-wide index.
       interaction.name = `${interaction.name} (${occurrence})`;
       interaction.evidence.push({
         kind: "heuristic",
@@ -891,10 +891,10 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
   try {
     if (exploration.details.size > 0) records = traverse(document);
 
-    // Forms claim their fillable controls first (GV-007). A control owned by a
-    // form is a parameter of that form's tool and is not also emitted standalone.
-    // The form tool is fill-only: submission stays a standalone action (P1).
-    // Submit/reset/button/image inputs are actions, never parameters (P2).
+    // Forms claim their fillable controls first. A control owned by a form is
+    // a parameter of that form's tool and is not also emitted standalone. The
+    // form tool is fill-only: submission stays a standalone action.
+    // Submit/reset/button/image inputs are actions, never parameters.
     const formMemberIndex = new Map<HTMLFormElement, ElementRecord[]>();
     const claimed = new Set<Element>();
     for (const record of records) {
@@ -934,7 +934,7 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
         }
       } catch {
         // Isolate the failure so the remaining observations are still returned,
-        // and count it so the gap is explicit (GV-030).
+        // and count it so the gap is explicit.
         elementFailures++;
       }
     }

@@ -150,7 +150,7 @@ type SemanticNode struct {
 	// Nth selects among elements with the same role and name, in document
 	// order, and is zero when the match is unique. Disambiguating by ordinal
 	// rather than by mutating Name is what keeps Name a value the consumer can
-	// recompute from the page (GV-004).
+	// recompute from the page.
 	Nth int `json:"nth,omitempty"`
 }
 
