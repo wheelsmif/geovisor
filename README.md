@@ -72,6 +72,14 @@ choose a different path. If the primary artifact is sent to stdout without a
 bindings path, GEO-Visor warns on stderr that the binding recipes were not
 persisted.
 
+Keep the catalog on stdout and persist the recipes with `--bindings-output`.
+Redirect stdout when you want both artifacts on disk without `--output`:
+
+```sh
+geovisor inspect https://example.com --format mcp \
+  --bindings-output tools.mcp.bindings.json > tools.mcp.json
+```
+
 Emit every built-in format and companion into a directory:
 
 ```sh
