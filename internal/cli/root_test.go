@@ -287,7 +287,7 @@ func TestAllOutputUsesEmitterNamesAndStagesBeforeWriting(t *testing.T) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	wantFormats := []emitter.Format{
-		emitter.FormatTIRJSON, emitter.FormatWebMCP, emitter.FormatMCP, emitter.FormatOpenAI,
+		emitter.FormatTIRJSON, emitter.FormatMCP, emitter.FormatOpenAI,
 	}
 	if strings.Join(formatStrings(formats), ",") != strings.Join(formatStrings(wantFormats), ",") {
 		t.Fatalf("formats = %v, want %v", formats, wantFormats)
@@ -296,7 +296,7 @@ func TestAllOutputUsesEmitterNamesAndStagesBeforeWriting(t *testing.T) {
 		t.Fatal("OpenAI strict option was not forwarded")
 	}
 	for _, name := range []string{
-		"primary-tir-json", "primary-webmcp", "primary-mcp", "bindings-mcp",
+		"primary-tir-json", "primary-mcp", "bindings-mcp",
 		"primary-openai", "bindings-openai",
 	} {
 		if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
@@ -318,7 +318,6 @@ func TestAllOutputIncludesBuiltInCompanions(t *testing.T) {
 	}
 	for _, name := range []string{
 		"tir.json",
-		"tools.webmcp.js",
 		"tools.mcp.json",
 		"tools.mcp.bindings.json",
 		"tools.openai.json",
@@ -404,7 +403,7 @@ func TestEmitterFailureDoesNotWriteAnyAllOutput(t *testing.T) {
 		_ *tir.Document,
 		_ emitter.Options,
 	) (emitter.Result, error) {
-		if format == emitter.FormatWebMCP {
+		if format == emitter.FormatMCP {
 			return emitter.Result{}, &emitter.Error{
 				Format: format, Code: emitter.CodeMarshal, Err: errors.New("failed"),
 			}
@@ -515,7 +514,7 @@ func TestOpenAIStrictAppliesOnlyToOpenAIWhenEmittingAll(t *testing.T) {
 	if !strict[emitter.FormatOpenAI] {
 		t.Fatal("OpenAI emit did not receive Strict")
 	}
-	if strict[emitter.FormatMCP] || strict[emitter.FormatWebMCP] || strict[emitter.FormatTIRJSON] {
+	if strict[emitter.FormatMCP] || strict[emitter.FormatTIRJSON] {
 		t.Fatalf("Strict leaked to non-OpenAI formats: %#v", strict)
 	}
 	if !strings.Contains(stderr.String(), "--openai-strict applies only to the OpenAI artifact") {

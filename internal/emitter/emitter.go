@@ -13,7 +13,6 @@ type Format string
 
 const (
 	FormatTIRJSON Format = "tir-json"
-	FormatWebMCP  Format = "webmcp"
 	FormatMCP     Format = "mcp"
 	FormatOpenAI  Format = "openai"
 )
@@ -69,7 +68,6 @@ func NewRegistry(emitters ...Emitter) (*Registry, error) {
 func DefaultRegistry() *Registry {
 	registry, err := NewRegistry(
 		CanonicalJSON{},
-		WebMCP{},
 		MCP{},
 		OpenAI{},
 	)
@@ -122,9 +120,7 @@ func canonicalDocument(ctx context.Context, format Format, document *tir.Documen
 	return canonical, nil
 }
 
-// annotationHints are the side-effect flags shared by MCP and WebMCP. The two
-// formats name the open-world/consequential bit differently but compute it
-// from the same classes (GV-023).
+// annotationHints are the side-effect flags used by the MCP catalog.
 type annotationHints struct {
 	readOnly  bool
 	openWorld bool

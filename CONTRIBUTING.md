@@ -13,7 +13,7 @@ go vet ./...
 ```
 
 `./scripts/check.sh` and `./scripts/check.ps1` set `GEOVISOR_REQUIRE_NODE=1`
-after `npm` succeeds so the WebMCP round-trip harness cannot skip. Use
+after `npm` succeeds so the apply round-trip harness cannot skip. Use
 `GEOVISOR_REQUIRE_BROWSER=1 go test ./...` when Chromium integration is
 required. On PowerShell:
 
@@ -33,7 +33,7 @@ inspection output.
 - Keep browser execution agent-owned; do not add a host MCP daemon.
 - Keep canonical TIR independent of browser libraries and emitter formats.
 - Treat URL launch and same-session CDP attach as source adapters.
-- Treat WebMCP, MCP, and OpenAI as emitters.
+- Treat MCP and OpenAI as emitters.
 - Keep safe exploration non-navigating and non-submitting.
 - Make stealth opt-in and partial frame coverage explicit.
 - Do not add timestamps, random IDs, maps, or unstable ordering to core TIR.

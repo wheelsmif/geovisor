@@ -39,10 +39,8 @@ must never enter TIR or emitter output.
 
 Tool names, descriptions, and other labels originate in page text
 (`aria-label`, `title`, `textContent`). Treat generated artifacts as
-untrusted model input: a hostile page can choose that text. WebMCP sets
-`untrustedContentHint` on every registered tool to reflect this provenance.
-JSON escaping prevents `</script>` injection into emitted modules; it does
-not make page-derived strings safe to follow as instructions.
+untrusted model input: a hostile page can choose that text. JSON escaping
+does not make page-derived strings safe to follow as instructions.
 
 Owned Chromium launches disable go-rod's leakless helper at runtime. The
 transitive module remains in dependency metadata because go-rod imports it.

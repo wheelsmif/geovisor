@@ -1,4 +1,4 @@
-// DOM access helpers shared by the extractor and the generated WebMCP runtime.
+// DOM access helpers shared by the extractor and the apply runtime.
 //
 // Shared code must be realm-agnostic. The extractor only ever sees elements
 // from the document it was injected into, but the runtime resolves across frame

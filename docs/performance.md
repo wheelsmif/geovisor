@@ -1,9 +1,9 @@
 # Performance target
 
 The release target is less than 50 ms for post-extraction work: observation
-compilation, canonical TIR validation/serialization, and emission of TIR,
-WebMCP, MCP, strict OpenAI, and binding companions. Browser startup, navigation,
-DOM stabilization, and payload execution are intentionally excluded.
+compilation, canonical TIR validation/serialization, and emission of TIR, MCP,
+strict OpenAI, and binding companions. Browser startup, navigation, DOM
+stabilization, and payload execution are intentionally excluded.
 
 `BenchmarkCorpusCompileAndEmit` builds a deterministic 100-tool observation
 corpus from the committed payload contract fixture and runs the compiler and

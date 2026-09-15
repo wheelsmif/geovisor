@@ -184,7 +184,7 @@ func newInspectCommand(stdout, stderr io.Writer, dependencies Dependencies) *cob
 	}
 
 	flags := command.Flags()
-	flags.StringVarP(&options.Format, "format", "f", options.Format, "output format: tir, webmcp, mcp, openai, or all")
+	flags.StringVarP(&options.Format, "format", "f", options.Format, "output format: tir, mcp, openai, or all")
 	flags.StringVarP(&options.Output, "output", "o", "", "output file, or output directory with --format all")
 	flags.StringVar(&options.BindingsOutput, "bindings-output", "", "MCP/OpenAI executable bindings file")
 	flags.BoolVar(&options.OpenAIStrict, "openai-strict", false, "emit strict schemas for the OpenAI artifact only")
@@ -239,8 +239,6 @@ func validateInspectInvocation(command *cobra.Command, args []string, options *i
 	switch options.Format {
 	case "tir":
 		options.selectedFormat = emitter.FormatTIRJSON
-	case "webmcp":
-		options.selectedFormat = emitter.FormatWebMCP
 	case "mcp":
 		options.selectedFormat = emitter.FormatMCP
 	case "openai":
@@ -248,7 +246,7 @@ func validateInspectInvocation(command *cobra.Command, args []string, options *i
 	case "all":
 		options.all = true
 	default:
-		return usagef("unsupported --format %q (want tir, webmcp, mcp, openai, or all)", options.Format)
+		return usagef("unsupported --format %q (want tir, mcp, openai, or all)", options.Format)
 	}
 
 	if options.all && strings.TrimSpace(options.Output) == "" {
@@ -349,7 +347,6 @@ func executeInspect(
 	if options.all {
 		formats = []emitter.Format{
 			emitter.FormatTIRJSON,
-			emitter.FormatWebMCP,
 			emitter.FormatMCP,
 			emitter.FormatOpenAI,
 		}

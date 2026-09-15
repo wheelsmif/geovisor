@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/wheelsmif/geovisor/internal/tir"
@@ -18,7 +17,7 @@ func TestDefaultRegistry(t *testing.T) {
 	t.Parallel()
 
 	registry := DefaultRegistry()
-	want := []Format{FormatTIRJSON, FormatWebMCP, FormatMCP, FormatOpenAI}
+	want := []Format{FormatTIRJSON, FormatMCP, FormatOpenAI}
 	if got := registry.Formats(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("formats = %v, want %v", got, want)
 	}
@@ -67,7 +66,6 @@ func TestEmitterGoldensAndDeterminism(t *testing.T) {
 		options Options
 	}{
 		{name: "tir", emitter: CanonicalJSON{}},
-		{name: "webmcp", emitter: WebMCP{}},
 		{name: "mcp", emitter: MCP{}},
 		{name: "openai-nonstrict", emitter: OpenAI{}},
 		{name: "openai-strict", emitter: OpenAI{}, options: Options{Strict: true}},
@@ -181,17 +179,16 @@ func TestAnnotationDerivationForEverySideEffect(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		sideEffect    tir.SideEffectClass
-		readOnly      bool
-		openWorld     bool
-		consequential bool
+		sideEffect tir.SideEffectClass
+		readOnly   bool
+		openWorld  bool
 	}{
 		{sideEffect: tir.SideEffectNone, readOnly: false},
 		{sideEffect: tir.SideEffectLocalState},
-		{sideEffect: tir.SideEffectNetwork, openWorld: true, consequential: true},
-		{sideEffect: tir.SideEffectNavigation, openWorld: true, consequential: true},
-		{sideEffect: tir.SideEffectSubmission, openWorld: true, consequential: true},
-		{sideEffect: tir.SideEffectUnknown, openWorld: true, consequential: true},
+		{sideEffect: tir.SideEffectNetwork, openWorld: true},
+		{sideEffect: tir.SideEffectNavigation, openWorld: true},
+		{sideEffect: tir.SideEffectSubmission, openWorld: true},
+		{sideEffect: tir.SideEffectUnknown, openWorld: true},
 	}
 	for _, test := range tests {
 		test := test
@@ -220,58 +217,7 @@ func TestAnnotationDerivationForEverySideEffect(t *testing.T) {
 				mcp.OpenWorldHint != test.openWorld {
 				t.Fatalf("MCP annotations = %#v", mcp)
 			}
-
-			webResult, err := (WebMCP{}).Emit(context.Background(), document, Options{})
-			if err != nil {
-				t.Fatalf("emit WebMCP: %v", err)
-			}
-			definitions := decodeWebMCPDefinitions(t, webResult.Primary.Data)
-			if len(definitions) != 1 {
-				t.Fatalf("WebMCP tool count = %d", len(definitions))
-			}
-			web := jsonObject(t, definitions[0]["annotations"], "annotations")
-			if web["readOnlyHint"] != test.readOnly ||
-				web["consequentialHint"] != test.consequential ||
-				web["untrustedContentHint"] != true {
-				t.Fatalf("WebMCP annotations = %#v", web)
-			}
 		})
-	}
-}
-
-// TestWebMCPModuleSafetyInvariants checks the properties of the emitted text:
-// escaping, the capability guard, and how the embedded runtime is wired to the
-// definitions. It deliberately does not claim to test runtime behavior --
-// substring searches cannot tell a working module from a file containing the
-// right words (GV-038). Runtime behavior is covered by executing the module in
-// internal/integration/webmcp_roundtrip_test.go (GV-036).
-func TestWebMCPModuleSafetyInvariants(t *testing.T) {
-	t.Parallel()
-
-	result, err := (WebMCP{}).Emit(context.Background(), fixtureDocument(), Options{})
-	if err != nil {
-		t.Fatalf("emit WebMCP: %v", err)
-	}
-	source := string(result.Primary.Data)
-	for _, required := range []string{
-		"document.modelContext.registerTool",
-		"__geovisorRuntime.register(__geovisorDefinitions)",
-		"page JavaScript cannot bypass this browser boundary",
-		"shadowRoot",
-		"consequentialHint",
-	} {
-		if !strings.Contains(source, required) {
-			t.Fatalf("module does not contain %q", required)
-		}
-	}
-	if strings.Contains(strings.ToLower(source), "</script>") {
-		t.Fatal("module contains an unescaped script end tag")
-	}
-	if strings.ContainsRune(source, '\u2028') || strings.ContainsRune(source, '\u2029') {
-		t.Fatal("module contains a raw JavaScript line separator")
-	}
-	if strings.Contains(source, "playwright") {
-		t.Fatal("module must not depend on Playwright")
 	}
 }
 
@@ -304,9 +250,9 @@ func TestCompanionBindingsAreSeparateAndResolved(t *testing.T) {
 			}
 		})
 	}
-	_, err := BindingArtifact(context.Background(), document, FormatWebMCP)
+	_, err := BindingArtifact(context.Background(), document, FormatTIRJSON)
 	if !IsErrorCode(err, CodeUnsupportedFormat) {
-		t.Fatalf("WebMCP binding error = %T %v", err, err)
+		t.Fatalf("TIR binding error = %T %v", err, err)
 	}
 }
 
@@ -366,14 +312,6 @@ func TestTypedErrors(t *testing.T) {
 			},
 			code: CodeInvalidDocument,
 		},
-		{
-			name:    "WebMCP action without locator",
-			emitter: WebMCP{},
-			mutate: func(document *tir.Document) {
-				document.Tools[0].Actions[0].LocatorCandidateIDs = []string{}
-			},
-			code: CodeUnsupportedShape,
-		},
 	}
 	for _, test := range tests {
 		test := test
@@ -389,175 +327,9 @@ func TestTypedErrors(t *testing.T) {
 	}
 }
 
-func TestWebMCPSkipsCrossOriginOnlyTools(t *testing.T) {
-	t.Parallel()
-
-	document := tir.NewDocument(tir.SourceMetadata{
-		Kind:              tir.SourceLaunchURL,
-		ExecutionBoundary: tir.ExecutionAgentOwned,
-		RequestedURL:      "https://app.example/path",
-		FinalURL:          "https://app.example/path",
-	})
-	document.FrameCoverage.Status = tir.CoverageComplete
-	document.FrameCoverage.Frames = []tir.CoveredFrame{
-		{Path: []tir.FrameReference{}, URL: "https://app.example/path", Origin: "https://app.example"},
-		{
-			Path:   []tir.FrameReference{{Index: 0, Name: "pay", Src: "https://pay.example/checkout"}},
-			URL:    "https://pay.example/checkout",
-			Origin: "https://pay.example",
-		},
-	}
-	document.Tools = []tir.Tool{
-		{
-			ID:   "local_button",
-			Name: "Local",
-			Locators: []tir.LocatorCandidate{{
-				ID:          "local-locator",
-				CSSFallback: "#local",
-				Confidence:  tir.Confidence{Score: 1},
-			}},
-			Actions: []tir.ActionBinding{{
-				Action:              tir.ActionClick,
-				LocatorCandidateIDs: []string{"local-locator"},
-				SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
-			}},
-			Confidence: tir.Confidence{Score: 1},
-		},
-		{
-			ID:   "pay_button",
-			Name: "Pay",
-			Locators: []tir.LocatorCandidate{{
-				ID: "pay-locator",
-				FramePath: []tir.PathNode{{
-					Semantic: &tir.SemanticNode{Role: "iframe", Nth: 0},
-				}},
-				CSSFallback: "#pay",
-				Confidence:  tir.Confidence{Score: 1},
-			}},
-			Actions: []tir.ActionBinding{{
-				Action:              tir.ActionClick,
-				LocatorCandidateIDs: []string{"pay-locator"},
-				SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
-			}},
-			Confidence: tir.Confidence{Score: 1},
-		},
-	}
-	document.Normalize()
-
-	mcpResult, err := (MCP{}).Emit(context.Background(), document, Options{})
-	if err != nil {
-		t.Fatalf("emit MCP: %v", err)
-	}
-	var manifest struct {
-		Tools []struct {
-			Name string `json:"name"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(mcpResult.Primary.Data, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	if len(manifest.Tools) != 2 {
-		t.Fatalf("MCP tools = %d, want both local and cross-origin definitions", len(manifest.Tools))
-	}
-
-	webResult, err := (WebMCP{}).Emit(context.Background(), document, Options{})
-	if err != nil {
-		t.Fatalf("emit WebMCP: %v", err)
-	}
-	definitions := decodeWebMCPDefinitions(t, webResult.Primary.Data)
-	if len(definitions) != 1 || definitions[0]["name"] != "local_button" {
-		t.Fatalf("WebMCP definitions = %#v, want only local_button", definitions)
-	}
-}
-
-func TestWebMCPSkipsUncoveredFrameOnlyTools(t *testing.T) {
-	t.Parallel()
-
-	document := tir.NewDocument(tir.SourceMetadata{
-		Kind:              tir.SourceLaunchURL,
-		ExecutionBoundary: tir.ExecutionAgentOwned,
-		RequestedURL:      "https://app.example/path",
-		FinalURL:          "https://app.example/path",
-	})
-	document.FrameCoverage.Status = tir.CoveragePartial
-	document.FrameCoverage.Frames = []tir.CoveredFrame{
-		{Path: []tir.FrameReference{}, URL: "https://app.example/path", Origin: "https://app.example"},
-	}
-	document.FrameCoverage.Uncovered = []tir.UncoveredFrame{
-		{
-			Path:   []tir.FrameReference{{Index: 0, Name: "closed"}},
-			Reason: "frame is not visible to page JavaScript (closed shadow or equivalent)",
-		},
-	}
-	document.Tools = []tir.Tool{
-		{
-			ID:   "local_button",
-			Name: "Local",
-			Locators: []tir.LocatorCandidate{{
-				ID:          "local-locator",
-				CSSFallback: "#local",
-				Confidence:  tir.Confidence{Score: 1},
-			}},
-			Actions: []tir.ActionBinding{{
-				Action:              tir.ActionClick,
-				LocatorCandidateIDs: []string{"local-locator"},
-				SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
-			}},
-			Confidence: tir.Confidence{Score: 1},
-		},
-		{
-			ID:   "closed_button",
-			Name: "Closed",
-			Locators: []tir.LocatorCandidate{{
-				ID: "closed-locator",
-				FramePath: []tir.PathNode{{
-					Semantic: &tir.SemanticNode{Role: "iframe", Nth: 0},
-				}},
-				CSSFallback: "#closed",
-				Confidence:  tir.Confidence{Score: 1},
-			}},
-			Actions: []tir.ActionBinding{{
-				Action:              tir.ActionClick,
-				LocatorCandidateIDs: []string{"closed-locator"},
-				SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
-			}},
-			Confidence: tir.Confidence{Score: 1},
-		},
-	}
-	document.Normalize()
-
-	mcpResult, err := (MCP{}).Emit(context.Background(), document, Options{})
-	if err != nil {
-		t.Fatalf("emit MCP: %v", err)
-	}
-	var manifest struct {
-		Tools []struct {
-			Name string `json:"name"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(mcpResult.Primary.Data, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	if len(manifest.Tools) != 2 {
-		t.Fatalf("MCP tools = %d, want both local and uncovered-frame definitions", len(manifest.Tools))
-	}
-
-	webResult, err := (WebMCP{}).Emit(context.Background(), document, Options{})
-	if err != nil {
-		t.Fatalf("emit WebMCP: %v", err)
-	}
-	definitions := decodeWebMCPDefinitions(t, webResult.Primary.Data)
-	if len(definitions) != 1 || definitions[0]["name"] != "local_button" {
-		t.Fatalf("WebMCP definitions = %#v, want only local_button", definitions)
-	}
-}
-
 func TestValidDocumentEmitsOnEveryFormat(t *testing.T) {
 	t.Parallel()
 
-	// TIR validity is emitter-agnostic. WebMCP still rejects locator-less
-	// actions as a format-specific execution constraint; the fixture includes
-	// locators so every registered format, including WebMCP, succeeds.
 	registry := DefaultRegistry()
 	for _, format := range registry.Formats() {
 		if _, err := registry.Emit(context.Background(), format, fixtureDocument(), Options{Strict: true}); err != nil {
@@ -566,7 +338,20 @@ func TestValidDocumentEmitsOnEveryFormat(t *testing.T) {
 	}
 }
 
-func TestMCPAndWebMCPHonorStrict(t *testing.T) {
+func TestLocatorlessActionsEmitOnCatalogFormats(t *testing.T) {
+	t.Parallel()
+
+	document := fixtureDocument()
+	document.Tools[0].Actions[0].LocatorCandidateIDs = []string{}
+	document.Normalize()
+	for _, format := range []Format{FormatTIRJSON, FormatMCP, FormatOpenAI} {
+		if _, err := DefaultRegistry().Emit(context.Background(), format, document, Options{Strict: true}); err != nil {
+			t.Fatalf("emit %s: %v", format, err)
+		}
+	}
+}
+
+func TestMCPHonorsStrict(t *testing.T) {
 	t.Parallel()
 
 	nonStrictMCP := emitMCPTools(t, false)
@@ -575,11 +360,6 @@ func TestMCPAndWebMCPHonorStrict(t *testing.T) {
 	strictSchema := jsonObject(t, findMCPTool(t, strictMCP, "complex_tool")["inputSchema"], "strict MCP schema")
 	assertStrings(t, nonStrictSchema["required"], []string{"query"})
 	assertStrings(t, strictSchema["required"], []string{"query", "options"})
-
-	nonStrictWebMCP := emitWebMCPDefinitions(t, false)
-	strictWebMCP := emitWebMCPDefinitions(t, true)
-	assertStrings(t, jsonObject(t, findWebMCPTool(t, nonStrictWebMCP, "complex_tool")["inputSchema"], "non-strict WebMCP schema")["required"], []string{"query"})
-	assertStrings(t, jsonObject(t, findWebMCPTool(t, strictWebMCP, "complex_tool")["inputSchema"], "strict WebMCP schema")["required"], []string{"query", "options"})
 }
 
 func TestCanceledContext(t *testing.T) {
@@ -587,7 +367,7 @@ func TestCanceledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	for _, candidate := range []Emitter{CanonicalJSON{}, WebMCP{}, MCP{}, OpenAI{}} {
+	for _, candidate := range []Emitter{CanonicalJSON{}, MCP{}, OpenAI{}} {
 		_, err := candidate.Emit(ctx, fixtureDocument(), Options{})
 		if !IsErrorCode(err, CodeCanceled) || !errors.Is(err, context.Canceled) {
 			t.Fatalf("%s error = %T %v", candidate.Format(), err, err)
@@ -643,34 +423,6 @@ func findMCPTool(t *testing.T, tools []map[string]any, name string) map[string]a
 	return nil
 }
 
-func emitWebMCPDefinitions(t *testing.T, strict bool) []map[string]any {
-	t.Helper()
-	result, err := (WebMCP{}).Emit(context.Background(), fixtureDocument(), Options{Strict: strict})
-	if err != nil {
-		t.Fatalf("emit WebMCP: %v", err)
-	}
-	return decodeWebMCPDefinitions(t, result.Primary.Data)
-}
-
-func decodeWebMCPDefinitions(t *testing.T, data []byte) []map[string]any {
-	t.Helper()
-	prefix := []byte("const __geovisorDefinitions = ")
-	start := bytes.Index(data, prefix)
-	if start < 0 {
-		t.Fatal("WebMCP module is missing definitions")
-	}
-	start += len(prefix)
-	end := bytes.Index(data[start:], []byte(";\n"))
-	if end < 0 {
-		t.Fatal("WebMCP definitions are not terminated")
-	}
-	var definitions []map[string]any
-	if err := json.Unmarshal(data[start:start+end], &definitions); err != nil {
-		t.Fatalf("decode WebMCP definitions: %v", err)
-	}
-	return definitions
-}
-
 func annotationDocument(class tir.SideEffectClass) *tir.Document {
 	document := tir.NewDocument(tir.SourceMetadata{
 		Kind:              tir.SourceLaunchURL,
@@ -716,17 +468,6 @@ func jsonArray(t *testing.T, value any, path string) []any {
 		t.Fatalf("%s = %T, want array", path, value)
 	}
 	return array
-}
-
-func findWebMCPTool(t *testing.T, tools []map[string]any, name string) map[string]any {
-	t.Helper()
-	for _, tool := range tools {
-		if tool["name"] == name {
-			return tool
-		}
-	}
-	t.Fatalf("WebMCP tool %q not found", name)
-	return nil
 }
 
 func emitOpenAITools(t *testing.T, strict bool) []map[string]any {

@@ -123,8 +123,6 @@ func compileAndEmit(t *testing.T, root string, input compiler.Input) map[emitter
 			validateSchema(t, root, "mcp-tools-list-2026-07-28.schema.json", result.Primary.Data)
 		case emitter.FormatOpenAI:
 			validateSchema(t, root, "openai-function-tools.schema.json", result.Primary.Data)
-		case emitter.FormatWebMCP:
-			checkJavaScriptSyntax(t, result.Primary.Data)
 		}
 		if result.Companion != nil {
 			assertNoSensitiveValues(t, result.Companion.Data)
@@ -170,22 +168,6 @@ func validateSchema(t *testing.T, root, schemaName string, payload []byte) {
 	}
 	if err := schema.Validate(value); err != nil {
 		t.Fatalf("validate payload against %s: %v", schemaName, err)
-	}
-}
-
-func checkJavaScriptSyntax(t *testing.T, source []byte) {
-	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("Node.js is required to syntax-check generated WebMCP JavaScript")
-	}
-	path := filepath.Join(t.TempDir(), "tools.webmcp.mjs")
-	if err := os.WriteFile(path, source, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(node, "--check", path)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("generated WebMCP JavaScript is invalid: %v\n%s", err, output)
 	}
 }
 

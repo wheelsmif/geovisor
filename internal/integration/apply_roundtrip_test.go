@@ -18,22 +18,19 @@ import (
 )
 
 // The round-trip harness closes the loop the review found missing (GV-036). The
-// extractor and the generated WebMCP runtime are two implementations of role
-// resolution, accessible-name computation, and element addressing; until now no
-// test ran one against the other, which is why GV-001, GV-003, and GV-004 were
-// invisible. Here the emitted module is imported and executed against the same
-// DOM the observation came from.
-const roundTripDriver = "client/test/webmcp-roundtrip.mjs"
+// extractor and apply-runtime share client/src/shared/ for role resolution,
+// accessible-name computation, and element addressing. Tests compile TIR and
+// apply it against the same DOM the observation came from.
+const roundTripDriver = "client/test/apply-roundtrip.mjs"
 
 // roundTripInputs are the files the Node driver reads. The Go test cache tracks
 // files the test process itself opens, not files a subprocess opens, so editing
-// the driver or a committed bundle would otherwise leave a cached PASS while the
-// behavior under test had changed -- which it did, silently, during Phase 2.
-// Reading them here declares them as inputs (GV-050).
+// the driver or apply runtime would otherwise leave a cached PASS while the
+// behavior under test had changed.
 var roundTripInputs = []string{
 	roundTripDriver,
 	"internal/payload/extractor.js",
-	"internal/emitter/webmcp-runtime.js",
+	"client/src/apply-runtime.ts",
 }
 
 // Tool IDs are a slug plus a twelve-character content digest. Tests address
@@ -41,9 +38,9 @@ var roundTripInputs = []string{
 var toolIDPattern = regexp.MustCompile(`^(.+)-[0-9a-f]{12}$`)
 
 type roundTripReport struct {
-	ModuleError string                 `json:"moduleError"`
-	Elements    []roundTripElement     `json:"elements"`
-	Tools       []roundTripToolOutcome `json:"tools"`
+	ApplyError string                 `json:"applyError"`
+	Elements   []roundTripElement     `json:"elements"`
+	Tools      []roundTripToolOutcome `json:"tools"`
 }
 
 type roundTripElement struct {
@@ -133,14 +130,14 @@ func toolSlug(id string) string {
 // closed, so the helper is gone; staticcheck would flag it as dead code, which
 // is the outcome the phase was aiming for.
 
-func TestWebMCPRuntimeResolvesAgainstOriginatingDOM(t *testing.T) {
+func TestApplyRuntimeResolvesAgainstOriginatingDOM(t *testing.T) {
 	_, report := runRoundTrip(t, fixturePath, nil)
 
-	if report.ModuleError != "" {
-		t.Fatalf("emitted WebMCP module failed to load: %s", report.ModuleError)
+	if report.ApplyError != "" {
+		t.Fatalf("apply runtime failed to load: %s", report.ApplyError)
 	}
 	if len(report.Tools) == 0 {
-		t.Fatal("emitted WebMCP module registered no tools")
+		t.Fatal("compiled TIR produced no applyable tools")
 	}
 
 	// Every advertised tool must work against the DOM it was derived from. A
@@ -169,7 +166,7 @@ func TestWebMCPRuntimeResolvesAgainstOriginatingDOM(t *testing.T) {
 	}
 }
 
-func TestWebMCPRuntimeSelectAppliesAdvertisedOption(t *testing.T) {
+func TestApplyRuntimeSelectAppliesAdvertisedOption(t *testing.T) {
 	// GV-001: the extractor advertises option labels while the runtime assigns
 	// the advertised string to element.value, so every <select> whose option
 	// values differ from their visible text yields a permanently broken tool.
@@ -212,7 +209,7 @@ func TestWebMCPRuntimeSelectAppliesAdvertisedOption(t *testing.T) {
 	t.Fatalf("select tool %q never resolved to a select element", tool.Name)
 }
 
-func TestWebMCPRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
+func TestApplyRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
 	// GV-003 and GV-004 both fail by silently degrading to the CSS fallback:
 	// the semantic strategy never matches, the runtime swallows the failure,
 	// and a passing tool hides a broken locator. Removing the CSS fallback
@@ -224,8 +221,8 @@ func TestWebMCPRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
 	// dialog, or summary can never match.
 	_, report := runRoundTrip(t, fixturePath, stripCSSFallbacks)
 
-	if report.ModuleError != "" {
-		t.Fatalf("semantic-only WebMCP module failed to load: %s", report.ModuleError)
+	if report.ApplyError != "" {
+		t.Fatalf("semantic-only apply failed to load: %s", report.ApplyError)
 	}
 	for _, tool := range report.Tools {
 		if tool.Error != "" {
@@ -238,17 +235,17 @@ func TestWebMCPRuntimeSemanticStrategyResolvesWithoutCSSFallback(t *testing.T) {
 	}
 }
 
-// TestWebMCPRuntimeResolvesIdenticalNamesToDistinctElements is GV-004's real
+// TestApplyRuntimeResolvesIdenticalNamesToDistinctElements is GV-004's real
 // acceptance criterion. The semantic-only test above only proves each locator
 // resolves to *something*; three tools all resolving to the same element would
 // satisfy it. The fixture has three textboxes named "Query", two of them in one
 // scope, so distinctness is what separates a working ordinal from a locator
 // that always returns the first match.
-// TestWebMCPRuntimeDoesNotRegisterStandaloneFormControls is GV-007. A control
+// TestApplyRuntimeDoesNotRegisterStandaloneFormControls is GV-007. A control
 // owned by a form is a parameter of that form's tool. Registering it again as
 // its own tool gives an agent two ways to fill one field and no basis for
 // choosing. Submit buttons stay standalone: they are actions, not parameters.
-func TestWebMCPRuntimeDoesNotRegisterStandaloneFormControls(t *testing.T) {
+func TestApplyRuntimeDoesNotRegisterStandaloneFormControls(t *testing.T) {
 	_, report := runRoundTrip(t, fixturePath, nil)
 
 	form := report.bySlug(t, "profile-form")
@@ -282,7 +279,7 @@ func countSlugsWithPrefix(report roundTripReport, prefix string) int {
 	return count
 }
 
-func TestWebMCPRuntimeResolvesIdenticalNamesToDistinctElements(t *testing.T) {
+func TestApplyRuntimeResolvesIdenticalNamesToDistinctElements(t *testing.T) {
 	_, report := runRoundTrip(t, fixturePath, stripCSSFallbacks)
 
 	type resolvedTool struct {
@@ -321,7 +318,7 @@ func TestWebMCPRuntimeResolvesIdenticalNamesToDistinctElements(t *testing.T) {
 	}
 }
 
-// TestWebMCPRuntimeResolvesFramePathsToTheCorrectFrame covers GV-003.
+// TestApplyRuntimeResolvesFramePathsToTheCorrectFrame covers GV-003.
 //
 // The fixture is the case both halves of the old frame locator got wrong: two
 // wrappers each holding one identical, unnamed frame. A selector counting
@@ -332,11 +329,11 @@ func TestWebMCPRuntimeResolvesIdenticalNamesToDistinctElements(t *testing.T) {
 // The two tools differ *only* in their frame path, and their locators carry the
 // same role and name, so reaching the right input proves the frame path did the
 // work.
-func TestWebMCPRuntimeResolvesFramePathsToTheCorrectFrame(t *testing.T) {
+func TestApplyRuntimeResolvesFramePathsToTheCorrectFrame(t *testing.T) {
 	document, report := runRoundTrip(t, "testdata/corpus/frames.html", stripCSSFallbacks)
 
-	if report.ModuleError != "" {
-		t.Fatalf("emitted WebMCP module failed to load: %s", report.ModuleError)
+	if report.ApplyError != "" {
+		t.Fatalf("apply runtime failed to load: %s", report.ApplyError)
 	}
 
 	type framed struct {
@@ -378,7 +375,7 @@ func TestWebMCPRuntimeResolvesFramePathsToTheCorrectFrame(t *testing.T) {
 	}
 }
 
-func TestWebMCPRuntimeResolvesAmbiguousScopesToDistinctElements(t *testing.T) {
+func TestApplyRuntimeResolvesAmbiguousScopesToDistinctElements(t *testing.T) {
 	fixture := writeRoundTripFixture(t, `<!doctype html>
 <html lang="en"><body>
   <div role="region" aria-label="Panel"><input aria-label="Query"></div>
@@ -404,7 +401,7 @@ func TestWebMCPRuntimeResolvesAmbiguousScopesToDistinctElements(t *testing.T) {
 	}
 }
 
-func TestWebMCPFormToolDoesNotSubmit(t *testing.T) {
+func TestApplyFormToolDoesNotSubmit(t *testing.T) {
 	_, report := runRoundTrip(t, "testdata/corpus/two-submit.html", nil)
 	form := report.bySlug(t, "login")
 	if form.Error != "" {
@@ -430,7 +427,7 @@ func TestWebMCPFormToolDoesNotSubmit(t *testing.T) {
 	}
 }
 
-func TestWebMCPInputSubmitIsActionNotParameter(t *testing.T) {
+func TestApplyInputSubmitIsActionNotParameter(t *testing.T) {
 	_, report := runRoundTrip(t, "testdata/corpus/input-submit.html", nil)
 	form := report.bySlug(t, "checkout")
 	if form.Error != "" {
@@ -452,10 +449,10 @@ func TestWebMCPInputSubmitIsActionNotParameter(t *testing.T) {
 	}
 }
 
-func TestWebMCPSiblingShadowHostsResolveDistinctly(t *testing.T) {
+func TestApplySiblingShadowHostsResolveDistinctly(t *testing.T) {
 	document, report := runRoundTrip(t, "testdata/corpus/sibling-shadow.html", stripCSSFallbacks)
-	if report.ModuleError != "" {
-		t.Fatalf("module error: %s", report.ModuleError)
+	if report.ApplyError != "" {
+		t.Fatalf("module error: %s", report.ApplyError)
 	}
 	family := findDocumentToolByName(t, document, "Click")
 	if len(family.Locators) != 2 {
@@ -640,10 +637,10 @@ func runRoundTrip(
 	return runRoundTripBatches(t, fixture, transform, batches...)
 }
 
-// runRoundTripBatches compiles supplied observation batches, emits WebMCP, and
-// executes the module against the fixture. The extract driver now stamps frame
-// paths the same way the browser source does, so multi-frame fixtures go
-// through extract → compile → execute rather than a hand-built batch.
+// runRoundTripBatches compiles supplied observation batches and applies the
+// resulting TIR against the fixture. The extract driver stamps frame paths the
+// same way the browser source does, so multi-frame fixtures go through
+// extract → compile → apply rather than a hand-built batch.
 func runRoundTripBatches(
 	t *testing.T,
 	fixture string,
@@ -672,19 +669,19 @@ func runRoundTripBatches(
 
 	result, err := emitter.DefaultRegistry().Emit(
 		context.Background(),
-		emitter.FormatWebMCP,
+		emitter.FormatTIRJSON,
 		document,
 		emitter.Options{},
 	)
 	if err != nil {
-		t.Fatalf("emit WebMCP for %s: %v", fixture, err)
+		t.Fatalf("emit TIR for %s: %v", fixture, err)
 	}
-	modulePath := filepath.Join(t.TempDir(), "tools.webmcp.mjs")
-	if err := os.WriteFile(modulePath, result.Primary.Data, 0o600); err != nil {
+	tirPath := filepath.Join(t.TempDir(), "tir.json")
+	if err := os.WriteFile(tirPath, result.Primary.Data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	output := runDriver(t, node, root, "execute", fixture, modulePath)
+	output := runDriver(t, node, root, "execute", fixture, tirPath)
 	var report roundTripReport
 	if err := json.Unmarshal(output, &report); err != nil {
 		t.Fatalf("decode round-trip report: %v\n%s", err, output)
@@ -741,9 +738,9 @@ func requireNodeForRoundTrip(t *testing.T) string {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		if os.Getenv("GEOVISOR_REQUIRE_NODE") == "1" || os.Getenv("GEOVISOR_REQUIRE_BROWSER") == "1" {
-			t.Fatal("Node.js is required to execute the generated WebMCP runtime")
+			t.Fatal("Node.js is required to execute the apply runtime")
 		}
-		t.Skip("Node.js is required to execute the generated WebMCP runtime")
+		t.Skip("Node.js is required to execute the apply runtime")
 	}
 	return node
 }

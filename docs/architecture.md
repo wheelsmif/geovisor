@@ -20,7 +20,7 @@ The intended flow is:
 - `internal/observation`: browser-independent extraction facts.
 - `internal/compiler`: deterministic observation-to-TIR aggregation.
 - `internal/tir`: canonical DTOs, normalization, and cross-field validation.
-- `internal/emitter`: TIR, WebMCP, MCP, OpenAI, and binding artifacts.
+- `internal/emitter`: TIR, MCP, OpenAI, and binding artifacts.
 - `internal/output`: per-file atomic replace with call-scoped rollback if a
   later replace, chmod, or parent-directory sync fails.
 - `internal/version`: development default and release version injection point.
@@ -44,7 +44,7 @@ Canonical DTOs use ordered slices instead of maps. `NewDocument` and
 `schemas/tir.schema.json` share the same contract: type-consistent parameter
 shapes, tool IDs that match `^[A-Za-z0-9_-]{1,64}$`, unambiguous length-prefixed
 frame-path keys, explicit partial frame coverage, and the prohibition on safe
-exploration of navigation, submission, or unknown. A document that passes validation emits on every registered format, except
-that WebMCP still requires each executable action to name a locator.
+exploration of navigation, submission, or unknown. A document that passes
+validation emits on every registered format.
 
 See `docs/adr` for the decisions that establish these boundaries.

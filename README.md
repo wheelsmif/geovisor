@@ -57,7 +57,6 @@ geovisor inspect https://example.com
 Write one selected format to a file:
 
 ```sh
-geovisor inspect https://example.com --format webmcp --output tools.webmcp.js
 geovisor inspect https://example.com --format mcp --output tools.mcp.json
 geovisor inspect https://example.com --format openai --openai-strict \
   --output tools.openai.json
@@ -79,7 +78,6 @@ geovisor inspect https://example.com --format all --output ./generated
 uses deterministic emitter names:
 
 - `tir.json`
-- `tools.webmcp.js`
 - `tools.mcp.json` and `tools.mcp.bindings.json`
 - `tools.openai.json` and `tools.openai.bindings.json`
 
@@ -148,7 +146,8 @@ performs no exploration. It does not click, submit, fetch, or navigate.
 Stealth behavior is separately opt-in. Cross-origin frame gaps, closed shadow
 roots, suppressed element-level extraction failures, and access interstitials
 are surfaced as diagnostics or warnings rather than hidden. Page-derived tool
-names and descriptions are marked untrusted in WebMCP output.
+names and descriptions originate in page text and must be treated as untrusted
+model input.
 
 GEO-Visor-owned Chromium launches explicitly disable go-rod's leakless helper
 at runtime. Some antivirus products flag that helper; its module may still
@@ -172,10 +171,6 @@ Ctrl-C cancellation exits with `130`.
 ## Format limitations
 
 - `tir` is canonical `tir-json` and has no companion.
-- WebMCP is an executable browser-local ES module for the Chrome 153 imperative
-  API and has no companion. Browser page JavaScript cannot traverse
-  cross-origin frames or closed Shadow DOM, even when CDP extraction observed
-  those contexts.
 - MCP is a static `tools/list` result, not a hosted MCP server.
 - OpenAI is an unwrapped Responses API function-tool array.
 - MCP and OpenAI bindings are separate GEO-Visor browser execution recipes.
@@ -186,7 +181,7 @@ Ctrl-C cancellation exits with `130`.
 - Linux: amd64 and arm64 release archives; Chromium/Chrome required.
 - macOS: amd64 and arm64 release archives; Chromium/Chrome required.
 - Browser extraction uses CDP and is tested with installed Chromium-compatible
-  browsers. WebMCP output specifically targets the documented Chrome 153 API.
+  browsers.
 - Source development is pinned by `.go-version` and `.node-version` to Go
   1.26.6 and Node.js 24.15.0.
 
@@ -213,8 +208,6 @@ comparison checks. See `docs/performance.md`.
 - `access_interstitial`: the browser returned a challenge or blocked page.
   GEO-Visor does not bypass it; complete access manually or inspect a permitted
   page.
-- WebMCP registration failure: use a compatible browser with
-  `document.modelContext.registerTool`; generated code feature-detects the API.
 - Antivirus leakless alert: use official project builds and verify checksums.
   GEO-Visor disables leakless at runtime as described above.
 

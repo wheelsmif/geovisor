@@ -7,7 +7,7 @@ alwaysApply: true
 
 - Keep browser execution agent-owned; never add a host MCP daemon.
 - Model URL launch and same-session CDP attach as browser sources.
-- Keep canonical TIR emitter-agnostic; WebMCP, MCP, and OpenAI are emitters.
+- Keep canonical TIR emitter-agnostic; MCP and OpenAI are emitters.
 - Never place generated timestamps, random IDs, or unordered maps in core TIR.
 - Use structured locator candidates: frame path, shadow path, semantic
   scope/role/name, and optional CSS fallback.

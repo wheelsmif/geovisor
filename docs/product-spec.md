@@ -4,7 +4,7 @@
 
 GEO-Visor converts browser-observed interfaces into a canonical, deterministic
 Tool Intermediate Representation (TIR). Separate emitters will translate TIR to
-WebMCP, MCP, or OpenAI tool formats.
+MCP or OpenAI tool formats.
 
 ## Product boundaries
 
@@ -12,8 +12,8 @@ WebMCP, MCP, or OpenAI tool formats.
 - Browser execution is agent-owned; GEO-Visor does not host an MCP daemon.
 - Launching a URL and attaching to an existing same-session CDP endpoint are
   browser-source adapters.
-- Browser orchestration and extraction remain at the source edge; WebMCP, MCP,
-  and OpenAI remain emitter edges around canonical TIR.
+- Browser orchestration and extraction remain at the source edge; MCP and
+  OpenAI remain emitter edges around canonical TIR.
 
 ## Safety
 
@@ -41,8 +41,7 @@ WebMCP, MCP, or OpenAI tool formats.
 - TIR is versioned and emitter-agnostic.
 - `tir.Validate` and `schemas/tir.schema.json` are the single validity gate
   for shape and identifier constraints: every document they accept emits on
-  every registered format. WebMCP additionally requires each executable
-  action to name at least one locator candidate.
+  every registered format.
 - Parameter shapes are type-consistent: arrays have items, objects do not carry
   string enums or items, and primitives do not carry items, properties, or
   string enums.

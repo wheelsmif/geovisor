@@ -1,7 +1,7 @@
 // The single role-resolution implementation (GV-049).
 //
-// This used to exist twice: once here for the extractor and once as a Go string
-// literal in internal/emitter/webmcp.go. The runtime copy knew fewer elements
+// This used to exist twice: once here for the extractor and once as a copy
+// in the apply path. The runtime copy knew fewer elements
 // than the extractor, so locators scoped by <details>, <fieldset>, <nav>,
 // <dialog>, <summary>, or a heading could never match and degraded silently to
 // the CSS fallback. Producer and consumer now resolve roles through this

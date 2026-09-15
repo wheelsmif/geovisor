@@ -11,7 +11,7 @@ browser sources and output emitters at the edges.
 - Do not add a host MCP daemon.
 - Keep TIR independent of browser libraries and emitter formats.
 - Treat URL launch and same-session CDP attach as source adapters.
-- Treat WebMCP, MCP, and OpenAI as emitters.
+- Treat MCP and OpenAI as emitters.
 - Do not consult archived or superseded implementation trees.
 
 ## Safety and determinism

@@ -1,4 +1,4 @@
-// Text normalization shared by the extractor and the generated WebMCP runtime.
+// Text normalization shared by the extractor and the apply runtime.
 // Both sides must normalize identically or a name recorded at extraction time
 // will not compare equal to the same name recomputed at execution time.
 

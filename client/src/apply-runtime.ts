@@ -1,13 +1,10 @@
-// Entry point for the generated WebMCP module's runtime half.
+// Applies TIR action bindings against the current document.
 //
-// Built by client/scripts/build.mjs into internal/emitter/webmcp-runtime.js and
-// embedded by internal/emitter/webmcp.go, mirroring how the extractor bundle is
-// embedded by internal/payload. The emitter concatenates a capability guard, the
-// tool definitions, this bundle, and a registration call.
-//
-// It shares role resolution, accessible-name computation, and element
-// addressing with the extractor, so a locator the extractor can record is a
-// locator this runtime can resolve.
+// This is not a product emitter. GEO-Visor writes LLM API catalogs (MCP,
+// OpenAI) plus bindings; an agent-owned executor interprets those recipes.
+// Tests (and that executor) share this module with the extractor through
+// client/src/shared/ so a locator the extractor records is one apply can
+// resolve.
 
 import { isContentEditable } from "./shared/role";
 import { type LocatorCandidate, messageOf, resolveCandidate } from "./shared/locate";
@@ -15,55 +12,25 @@ import { optionIndexByLabel } from "./shared/option";
 
 type ActionKind = "click" | "fill" | "select" | "check";
 
-interface ActionBinding {
+export interface ActionBinding {
   action: ActionKind;
   inputParameter?: string;
   locatorCandidateIds: string[];
 }
 
-interface ToolDefinition {
+export interface ToolDefinition {
   name: string;
-  description: string;
+  description?: string;
   inputSchema: unknown;
-  annotations: unknown;
   actions: ActionBinding[];
   locators: LocatorCandidate[];
 }
 
-interface ToolRegistration {
-  name: string;
-  description: string;
-  inputSchema: unknown;
-  annotations: unknown;
-  execute: (input?: Record<string, unknown>, options?: { signal?: AbortSignal }) => Promise<unknown>;
-}
-
-interface ModelContextDocument extends Document {
-  modelContext: { registerTool: (registration: ToolRegistration) => Promise<void> | void };
-}
-
-export async function register(definitions: ToolDefinition[]): Promise<ToolRegistration[]> {
-  const registrations: ToolRegistration[] = [];
-  for (const definition of definitions) {
-    const registration: ToolRegistration = {
-      name: definition.name,
-      description: definition.description,
-      inputSchema: definition.inputSchema,
-      annotations: definition.annotations,
-      execute: async (input, options = {}) =>
-        executeTool(definition, input ?? {}, options.signal),
-    };
-    await (document as ModelContextDocument).modelContext.registerTool(registration);
-    registrations.push(registration);
-  }
-  return registrations;
-}
-
-async function executeTool(
+export async function executeTool(
   definition: ToolDefinition,
   input: Record<string, unknown>,
-  signal: AbortSignal | undefined,
-): Promise<unknown> {
+  signal?: AbortSignal,
+): Promise<void> {
   throwIfAborted(signal);
   for (const name of requiredParameters(definition.inputSchema)) {
     if (!Object.prototype.hasOwnProperty.call(input, name)) {
@@ -96,7 +63,6 @@ async function executeTool(
       );
     }
   }
-  return { content: [{ type: "text", text: `Executed ${definition.name}` }] };
 }
 
 function requiredParameters(schema: unknown): string[] {

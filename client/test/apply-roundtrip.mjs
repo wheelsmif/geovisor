@@ -1,36 +1,38 @@
-// Round-trip driver for the generated WebMCP runtime (GV-036).
+// Round-trip driver: extract a fixture, or apply compiled TIR against it.
 //
-// The emitted artifact is an ES module, which jsdom cannot execute. Node can,
-// so `execute` mode builds the DOM with jsdom, points the Node global
-// `document` at it, and imports the emitted module for real. The module reads
-// `document`, `element.ownerDocument.defaultView.Event`, and `DOMException`,
-// all of which resolve correctly under that arrangement.
+//   node client/test/apply-roundtrip.mjs extract <fixture.html>
+//   node client/test/apply-roundtrip.mjs execute <fixture.html> <tir.json>
 //
-//   node client/test/webmcp-roundtrip.mjs extract <fixture.html>
-//   node client/test/webmcp-roundtrip.mjs execute <fixture.html> <module.mjs>
-//
-// Both modes write a single JSON document to stdout.
+// Execute mode builds the DOM with jsdom, points the Node global `document` at
+// it, and runs client/src/apply-runtime.ts so locators resolve in the same
+// realm as the extractor. Both modes write a single JSON document to stdout.
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { JSDOM, VirtualConsole } from "jsdom";
 
-import { isFrame, messageOf, repositoryRoot, upgradeDeclarativeShadows, visitTree } from "./helpers.mjs";
+import {
+  isFrame,
+  loadEsbuildModule,
+  messageOf,
+  repositoryRoot,
+  upgradeDeclarativeShadows,
+  visitTree,
+} from "./helpers.mjs";
 
 const FIXTURE_URL = "https://roundtrip.example/";
 const STRING_INPUT = "GV-ROUNDTRIP";
 
-const [mode, fixturePath, modulePath] = process.argv.slice(2);
+const [mode, fixturePath, tirPath] = process.argv.slice(2);
 if (mode !== "extract" && mode !== "execute") {
-  throw new Error("usage: webmcp-roundtrip.mjs <extract|execute> <fixture.html> [module.mjs]");
+  throw new Error("usage: apply-roundtrip.mjs <extract|execute> <fixture.html> [tir.json]");
 }
 if (!fixturePath) {
   throw new Error("a fixture path is required");
 }
-if (mode === "execute" && !modulePath) {
-  throw new Error("execute mode requires the emitted module path");
+if (mode === "execute" && !tirPath) {
+  throw new Error("execute mode requires the compiled TIR path");
 }
 
 const html = await readFile(resolve(repositoryRoot, fixturePath), "utf8");
@@ -116,7 +118,7 @@ if (mode === "extract") {
   const batches = await extractFrameTree(dom.window.document, bundle);
   process.stdout.write(`${JSON.stringify({ batches })}\n`);
 } else {
-  process.stdout.write(`${JSON.stringify(await executeModule())}\n`);
+  process.stdout.write(`${JSON.stringify(await executeTIR())}\n`);
 }
 
 function collectFrames(root) {
@@ -145,7 +147,6 @@ function stampFramePath(batch, indexes) {
 
 // Frame-local extraction plus the same path stamping the browser source applies
 // in augmentBatch / frameTraversalNodes: role iframe, addressed by ordinal.
-// That is the extract → compile → execute path GV-003's harness was missing.
 async function extractFrameTree(document, bundle) {
   const batches = [];
   const extractWindow = async (win) => {
@@ -171,21 +172,41 @@ async function extractFrameTree(document, bundle) {
   return batches;
 }
 
-async function executeModule() {
+function toolDefinition(tool) {
+  const properties = {};
+  const required = [];
+  for (const parameter of tool.parameters ?? []) {
+    const property = { type: parameter.type };
+    if (parameter.description) property.description = parameter.description;
+    if (Array.isArray(parameter.enum) && parameter.enum.length > 0) {
+      property.enum = parameter.enum;
+    }
+    properties[parameter.name] = property;
+    if (parameter.required) required.push(parameter.name);
+  }
+  return {
+    name: tool.id,
+    description: tool.description ?? "",
+    inputSchema: { type: "object", properties, required },
+    actions: (tool.actionBindings ?? []).map((action) => ({
+      action: action.action,
+      inputParameter: action.inputParameter,
+      locatorCandidateIds: action.locatorCandidateIds ?? [],
+    })),
+    locators: tool.locatorCandidates ?? [],
+  };
+}
+
+async function executeTIR() {
   const dom = buildDOM();
   const document = dom.window.document;
 
   // Elements are identified by their index in document order. Nothing is
-  // stamped onto the DOM, so the document the module resolves against is the
-  // same document the extractor saw.
+  // stamped onto the DOM, so the document apply resolves against is the same
+  // document the extractor saw.
   const elements = collectElements(document);
   const indexOf = (element) => elements.indexOf(element);
 
-  // The runtime identifies itself by what it dispatches: `click` for click
-  // actions and `input`/`change` for fill, select, and check. Listening for
-  // those is how the driver learns which element each action resolved to, which
-  // is more precise than diffing state -- setting a checkbox that is already
-  // checked resolves correctly while changing nothing.
   const clicked = [];
   const submitted = [];
   const dispatched = [];
@@ -202,8 +223,6 @@ async function executeModule() {
             name: submitName(target),
           });
         }
-        // Cancel navigation and submission: the driver observes which element
-        // was clicked, it does not exercise what the page would do next.
         event.preventDefault();
       },
       true,
@@ -219,67 +238,61 @@ async function executeModule() {
     scope.addEventListener("change", (event) => dispatched.push(indexOf(composedTarget(event))), true);
   }
 
-  const registrations = [];
-  document.modelContext = {
-    registerTool(registration) {
-      registrations.push(registration);
-    },
-  };
-
   globalThis.document = document;
   globalThis.window = dom.window;
 
-  let moduleError = null;
+  let applyError = null;
+  let executeTool;
   try {
-    await import(pathToFileURL(resolve(modulePath)).href);
+    ({ executeTool } = await loadEsbuildModule(
+      resolve(repositoryRoot, "client", "src", "apply-runtime.ts"),
+      "geovisor-apply-",
+    ));
   } catch (error) {
-    moduleError = messageOf(error);
+    applyError = messageOf(error);
   }
 
   const tools = [];
-  for (const registration of registrations) {
-    for (const input of inputsFor(registration.inputSchema)) {
-      const before = snapshot(elements);
-      clicked.length = 0;
-      submitted.length = 0;
-      dispatched.length = 0;
-      inputEvents.length = 0;
-      let error = null;
-      try {
-        await registration.execute(input);
-      } catch (caught) {
-        error = messageOf(caught);
+  if (!applyError) {
+    const documentTIR = JSON.parse(await readFile(resolve(tirPath), "utf8"));
+    for (const tool of documentTIR.tools ?? []) {
+      const definition = toolDefinition(tool);
+      for (const input of inputsFor(definition.inputSchema)) {
+        const before = snapshot(elements);
+        clicked.length = 0;
+        submitted.length = 0;
+        dispatched.length = 0;
+        inputEvents.length = 0;
+        let error = null;
+        try {
+          await executeTool(definition, input);
+        } catch (caught) {
+          error = messageOf(caught);
+        }
+        const changed = diff(before, snapshot(elements));
+        const resolved = unique([...changed, ...clicked, ...dispatched]);
+        tools.push({
+          name: definition.name,
+          input,
+          error,
+          changed,
+          clicked: unique(clicked),
+          submitted: submitted.map((item) => ({ ...item })),
+          dispatched: unique(dispatched),
+          inputEvents: [...inputEvents],
+          state: resolved.map((index) => ({ index, ...describe(elements[index]) })),
+        });
       }
-      const changed = diff(before, snapshot(elements));
-      const resolved = unique([...changed, ...clicked, ...dispatched]);
-      tools.push({
-        name: registration.name,
-        annotations: registration.annotations ?? null,
-        input,
-        error,
-        changed,
-        clicked: unique(clicked),
-        submitted: submitted.map((item) => ({ ...item })),
-        dispatched: unique(dispatched),
-        inputEvents: [...inputEvents],
-        // State is reported for every element the tool resolved to, not only the
-        // ones whose state changed, so an assertion can check the end state even
-        // when the requested state already held.
-        state: resolved.map((index) => ({ index, ...describe(elements[index]) })),
-      });
     }
   }
 
   return {
-    moduleError,
+    applyError,
     elements: elements.map((element, index) => ({ index, ...describe(element) })),
     tools,
   };
 }
 
-// Shadow-retargeted events expose the host as event.target when observed
-// from the document. composedPath keeps the originating node so Alpha/Beta
-// (and other shadow tools) are not reported as the same host click (P19).
 function composedTarget(event) {
   const path = typeof event.composedPath === "function" ? event.composedPath() : [];
   for (const node of path) {
@@ -321,8 +334,6 @@ function describe(element) {
     value: "value" in element ? String(element.value ?? "") : null,
     checked: "checked" in element ? Boolean(element.checked) : null,
     selectedIndex: element.localName === "select" ? element.selectedIndex : null,
-    // The advertised enum is built from option labels, so the label is what an
-    // assertion has to compare against.
     selectedLabel: selected ? (selected.label || selected.textContent || "").trim() : null,
     text: element.isContentEditable ? element.textContent : null,
   };
@@ -369,9 +380,6 @@ function inputFor(schema) {
 
 function valueFor(property) {
   if (Array.isArray(property.enum) && property.enum.length > 0) {
-    // The *last* enum value, not the first: the first option of a <select> is
-    // already selected, so choosing it would let a tool that cannot change the
-    // selection at all still look like it worked.
     const usable = property.enum.filter((value) => value !== null);
     return usable.length > 0 ? usable[usable.length - 1] : null;
   }
