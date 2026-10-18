@@ -25,7 +25,6 @@ var (
 	citationMarkName *regexp.Regexp
 	doiName          *regexp.Regexp
 	bareRFCOrDOI     *regexp.Regexp
-	citationFragment *regexp.Regexp
 )
 
 func init() {
@@ -36,7 +35,6 @@ func init() {
 	citationMarkName = mustCompileLowValue("citationMarkName", patterns.CitationMarkName)
 	doiName = mustCompileLowValue("doiName", "(?i)"+patterns.DOIName)
 	bareRFCOrDOI = mustCompileLowValue("bareRFCOrDOI", "(?i)"+patterns.BareRFCOrDOI)
-	citationFragment = mustCompileLowValue("citationFragment", "(?i)"+patterns.CitationFragment)
 }
 
 func parseLowValuePatterns(raw []byte) (lowValuePatterns, error) {
