@@ -3,3 +3,6 @@
 *.exe binary
 *.gz binary
 *.zip binary
+
+internal/payload/extractor.js linguist-generated=true -diff
+package-lock.json linguist-generated=true

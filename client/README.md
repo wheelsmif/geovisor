@@ -1,5 +1,9 @@
 # Browser payloads
 
+The root `package.json` name is `geovisor-client`. It is `"private": true` and
+is not published to npm. This tree is the payload source plus the test harness
+in `client/src/apply-runtime.ts`. GEO-Visor does not ship an executor.
+
 `npm run build` produces the committed extractor bundle from this source tree:
 
 | Entry point | Bundle | Embedded by |
@@ -34,15 +38,19 @@ all interaction frame paths are empty and `coverageReported` is false. The
 browser source owns frame discovery, same-session CDP execution, and combining
 frame-local batches.
 
-Safe exploration is opt-in. It performs bounded, direct local state changes
-only; currently it may open eligible `<details>` elements, yields so `toggle`
-handlers can run, and restores each element's prior `open` state before
-returning. `maxDepth: 0` performs no exploration. It never invokes click,
-submit, navigation, value-changing, or network APIs. Unknown effects remain
-unsafe. `timeoutMs` is a real deadline across that async work. CSS fallback
-generation is separately bounded: `@medv/finder` has a short per-call budget
-and degrades to a simple unique selector when that budget is exhausted, so
-selector search cannot consume the frame extraction deadline.
+Safe exploration is opt-in. It sets eligible `<details open>`, yields so
+`toggle` handlers can run, and restores each element's prior `open` state
+before returning. It does not consult `safeForExploration`. `maxDepth: 0` and
+`maxOperations: 0` perform no exploration. It never invokes click, submit,
+navigation, value-changing, or network APIs. The schema still rejects
+`safeForExploration: true` for `unknown`, `navigation`, and `submission`.
+`timeoutMs` is a real deadline across the exploration yields. CSS fallback
+generation does not use that deadline. An element with an id uses `#id` and
+does not call `@medv/finder`. Otherwise finder runs with `timeoutMs: Infinity`
+and `maxNumberOfPathChecks: 5000` (`FINDER_PATH_CHECKS` in
+`client/src/extractor.ts`). There is no wall-clock abort. When that search
+does not return a unique match, the fallback is the tag, with `:nth-of-type`
+when the tag is repeated among siblings.
 
 The extractor never reads current control values. Hidden inputs are skipped,
 password fields are represented structurally, and select enums use visible
@@ -59,7 +67,11 @@ reported by the browser source via CDP.
 with the `geovisor` binary and is not a GEO-Visor emitter. The apply
 round-trip harness (`internal/integration/apply_roundtrip_test.go`) uses it to
 prove locators resolve. An agent-owned executor may reuse the idea; GEO-Visor
-does not ship one. Because option values are page data that must not leave the
+does not ship one. `executeTool` branches on `locatorSelection`. `ranked`
+treats locator candidates as ordered fallbacks for one element.
+`by_target_name` uses the parameter value to select one candidate; candidates
+line up with the enum in document order. The branch is that field, not the
+parameter name. Because option values are page data that must not leave the
 page, a `<select>` tool advertises option labels; apply matches an option by
 label and sets `selectedIndex` rather than assigning to `value`.
 

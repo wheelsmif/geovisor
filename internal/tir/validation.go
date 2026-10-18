@@ -73,7 +73,7 @@ func validateDocument(d *Document) error {
 				return invalid(locatorPath+".id", "required", "must not be empty")
 			}
 			if _, exists := locatorIDs[locator.ID]; exists {
-				return invalid(locatorPath+".id", "duplicate_locator_id", "must be globally unique")
+				return invalid(locatorPath+".id", CodeDuplicateLocatorID, "must be globally unique")
 			}
 			locatorIDs[locator.ID] = struct{}{}
 			localLocators[locator.ID] = struct{}{}
@@ -110,32 +110,38 @@ func validateDocument(d *Document) error {
 			}
 		}
 
+		if len(tool.Actions) == 0 {
+			return invalid(path+".actionBindings", CodeMissingAction, "must contain at least one action")
+		}
 		for ai := range tool.Actions {
 			actionPath := fmt.Sprintf("%s.actionBindings[%d]", path, ai)
 			action := &tool.Actions[ai]
 			if !validActionKind(action.Action) {
-				return invalid(actionPath+".action", "invalid_action_kind", "contains an unsupported value")
+				return invalid(actionPath+".action", CodeInvalidActionKind, "contains an unsupported value")
 			}
 			if action.InputParameter != "" {
 				if _, exists := parameterNames[action.InputParameter]; !exists {
-					return invalid(actionPath+".inputParameter", "unknown_parameter", "must name a parameter on the same tool")
+					return invalid(actionPath+".inputParameter", CodeUnknownParameter, "must name a parameter on the same tool")
 				}
 			}
 			seenRefs := make(map[string]struct{}, len(action.LocatorCandidateIDs))
 			for ri, id := range action.LocatorCandidateIDs {
 				if _, exists := localLocators[id]; !exists {
-					return invalid(fmt.Sprintf("%s.locatorCandidateIds[%d]", actionPath, ri), "unknown_locator", "must reference a locator on the same tool")
+					return invalid(fmt.Sprintf("%s.locatorCandidateIds[%d]", actionPath, ri), CodeUnknownLocator, "must reference a locator on the same tool")
 				}
 				if _, exists := seenRefs[id]; exists {
-					return invalid(fmt.Sprintf("%s.locatorCandidateIds[%d]", actionPath, ri), "duplicate_locator_reference", "must be unique")
+					return invalid(fmt.Sprintf("%s.locatorCandidateIds[%d]", actionPath, ri), CodeDuplicateLocatorReference, "must be unique")
 				}
 				seenRefs[id] = struct{}{}
 			}
+			if len(action.LocatorCandidateIDs) > 0 && !validLocatorSelection(action.LocatorSelection) {
+				return invalid(actionPath+".locatorSelection", CodeInvalidLocatorSelection, "must be ranked or by_target_name when locator candidates are present")
+			}
 			if !validSideEffectClass(action.SideEffect.Class) {
-				return invalid(actionPath+".sideEffect.class", "invalid_side_effect", "contains an unsupported value")
+				return invalid(actionPath+".sideEffect.class", CodeInvalidSideEffect, "contains an unsupported value")
 			}
 			if action.SideEffect.SafeForExploration && unsafeToExplore(action.SideEffect.Class) {
-				return invalid(actionPath+".sideEffect", "unsafe_exploration", "navigation, submission, and unknown cannot be safe for exploration")
+				return invalid(actionPath+".sideEffect", CodeUnsafeExploration, "navigation, submission, and unknown cannot be safe for exploration")
 			}
 		}
 	}
@@ -387,6 +393,10 @@ func validActionKind(kind ActionKind) bool {
 	default:
 		return false
 	}
+}
+
+func validLocatorSelection(selection LocatorSelection) bool {
+	return selection == LocatorSelectionRanked || selection == LocatorSelectionByTargetName
 }
 
 func unsafeToExplore(class SideEffectClass) bool {

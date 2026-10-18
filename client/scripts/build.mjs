@@ -18,7 +18,7 @@ const result = await build({
   charset: "utf8",
   entryPoints: [entry],
   format: "iife",
-  legalComments: "none",
+  legalComments: "eof",
   minify: true,
   platform: "browser",
   sourcemap: false,
@@ -31,7 +31,21 @@ const file = result.outputFiles[0];
 if (!file) {
   throw new Error(`esbuild did not produce ${relative(repositoryRoot, output)}`);
 }
-const bytes = Buffer.concat([Buffer.from(file.contents), Buffer.from("\n")]);
+// @medv/finder marks its MIT notice with "// License:", which esbuild does not
+// treat as a legal comment, so legalComments: "eof" does not keep it. Append
+// the upstream notice at the end of the bundle.
+const finderNotice = `
+/*!
+ * @license
+ * License: MIT
+ * Author: Anton Medvedev <anton@medv.io>
+ * Source: https://github.com/antonmedv/finder
+ */
+`;
+const bytes = Buffer.concat([
+  Buffer.from(file.contents),
+  Buffer.from(finderNotice),
+]);
 
 if (verify) {
   let committed;

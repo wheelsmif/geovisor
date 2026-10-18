@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "target", "tools"],
   "properties": {
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "1.1.0" },
     "target": { "enum": ["mcp", "openai"] },
     "tools": {
       "type": "array",
@@ -24,7 +24,8 @@
               "required": ["action", "sideEffect", "locatorCandidates"],
               "properties": {
                 "action": { "enum": ["click", "fill", "select", "check"] },
-                "inputParameter": { "type": "string", "minLength": 1 },
+                "inputParameter": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                "locatorSelection": { "enum": ["ranked", "by_target_name"] },
                 "sideEffect": {
                   "$ref": "tir.schema.json#/$defs/sideEffect"
                 },
@@ -34,7 +35,16 @@
                     "$ref": "tir.schema.json#/$defs/locatorCandidate"
                   }
                 }
-              }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": { "locatorCandidates": { "minItems": 1 } },
+                    "required": ["locatorCandidates"]
+                  },
+                  "then": { "required": ["locatorSelection"] }
+                }
+              ]
             }
           }
         }

@@ -22,6 +22,32 @@ func TestLookPathFindsWellKnownWindowsChrome(t *testing.T) {
 	}
 }
 
+func TestBrowserCandidatesKeepRodPlatformPaths(t *testing.T) {
+	t.Parallel()
+
+	darwin := browserCandidates("darwin")
+	if !containsPath(darwin, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome") {
+		t.Fatalf("darwin search = %v", darwin)
+	}
+	linux := browserCandidates("linux")
+	if !containsPath(linux, "/usr/bin/google-chrome") || !containsPath(linux, "/snap/bin/chromium") {
+		t.Fatalf("linux search = %v", linux)
+	}
+	windows := browserCandidates("windows")
+	if !containsPath(windows, "chrome") {
+		t.Fatalf("windows search = %v", windows)
+	}
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestExtraChromiumPathsIncludesProgramFilesX86(t *testing.T) {
 	t.Parallel()
 

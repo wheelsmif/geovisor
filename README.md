@@ -2,37 +2,53 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/wheelsmif/geovisor/actions/workflows/ci.yml/badge.svg)](https://github.com/wheelsmif/geovisor/actions/workflows/ci.yml)
 
-GEO-Visor observes browser interfaces and produces deterministic tool contracts
-through a canonical, emitter-agnostic Tool Intermediate Representation (TIR).
-It can launch an isolated Chromium instance or attach to an existing
-agent-owned Chromium CDP session.
+GEO-Visor is a compiler with one `inspect` command. It observes browser
+interfaces and produces deterministic tool contracts through a canonical,
+emitter-agnostic Tool Intermediate Representation (TIR). It can launch an
+isolated Chromium instance or attach to an existing agent-owned Chromium CDP
+session. MCP and OpenAI output are static catalogs. GEO-Visor does not host an
+MCP server, and it does not ship an executor.
 
 ## Requirements
 
-- Go 1.26.6 or newer 1.26 patch release
-- Node.js 24 and npm (source builds and client tests only)
-- A Chromium-family browser for inspection. Auto-detect includes Chrome,
-  Chromium, and Edge on Windows. `--browser-executable` still wins.
+- Go 1.26.9. `.go-version` is `1.26.9`. `go.mod` declares `go 1.26` and
+  `toolchain go1.26.9`.
+- Node.js 24.15.0 and npm for client edits and the check scripts. `go build`
+  and `go install` do not need Node. The extractor bundle
+  `internal/payload/extractor.js` is committed.
+- A Chromium-family browser for inspection. Discovery is described in
+  `docs/browser-sources.md`. `--browser-executable` still wins.
 
 ## Install
 
 Build from a source checkout:
 
 ```sh
-npm ci
-npm run verify:bundle
 go build -trimpath -o geovisor ./cmd/geovisor
 ```
 
-Or install the latest source revision with Go:
+On Windows, name the output `geovisor.exe`:
+
+```powershell
+go build -trimpath -o geovisor.exe ./cmd/geovisor
+```
+
+Or install the module with Go:
 
 ```sh
 go install github.com/wheelsmif/geovisor/cmd/geovisor@latest
 ```
 
-Release archives contain the same command under both `geovisor` and the shorter
-`gv` filename. Put either executable on `PATH`. Chromium remains a runtime
-requirement for inspection; Node.js is not required by a release binary.
+`go install` prints the module version from build info when that version is
+not `(devel)` or empty. A local development build still prints `0.0.0-dev`
+(`internal/version/version.go`). There are no git tags and no published GitHub
+releases, and there are no downloadable release archives. Local archives come
+from `scripts/build-release.sh` and `scripts/build-release.ps1` and include
+both `geovisor` and `gv` (`.exe` on Windows). See `docs/releasing.md`.
+
+PowerShell defines `gv` as `Get-Variable`, which shadows a `gv.exe` on `PATH`.
+Run `geovisor` or `.\gv.exe`. Chromium remains a runtime requirement for
+inspection.
 
 ## Build and test
 
@@ -95,6 +111,35 @@ uses deterministic emitter names:
 
 ## Attach to an existing browser
 
+Start Chrome yourself with `--remote-debugging-port` and a non-default
+`--user-data-dir`. Current Chrome refuses the default profile for that port
+flag.
+
+Windows:
+
+```powershell
+& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="$env:TEMP\geovisor-chrome-profile"
+```
+
+A 32-bit install is
+`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`, which discovery
+also searches.
+
+macOS:
+
+```sh
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/geovisor-chrome-profile"
+```
+
+Linux:
+
+```sh
+google-chrome --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/geovisor-chrome-profile"
+```
+
 Attach mode accepts no positional URL and does not navigate by default:
 
 ```sh
@@ -132,13 +177,17 @@ geovisor inspect https://example.com --safe-explore \
 Useful launch and readiness controls include `--headful`, `--stealth`,
 `--browser-executable`, `--timeout`, `--dom-quiet`,
 `--dom-quiet-timeout`, and `--frame-timeout`. `--frame-timeout` is the
-per-frame extraction deadline; it is independent of `--exploration-timeout` and
-defaults to the exploration budget plus time reserved for selector generation.
-A frame that exceeds that deadline is reported as uncovered because extraction
+per-frame extraction deadline. When the flag is omitted, the default is the
+exploration budget plus a 2 second selector allowance plus 2 seconds of frame
+overhead (`DefaultSelectorAllowance` and `DefaultFrameOverhead` in
+`internal/browser/validation.go`). The default `--exploration-timeout` is 1
+second, so the default frame deadline is 5 seconds. An explicit
+`--frame-timeout` must be positive and at least `--exploration-timeout`. A
+frame that exceeds that deadline is reported as uncovered because extraction
 timed out, not because the browsing context was lost. Stealth mode only removes
 common automation markers; it does not promise to bypass bot detection or
 access controls. Inaccessible frames are reported as typed diagnostics on
-stderr while partial artifacts still succeed.
+stderr and as TIR warnings while partial artifacts still succeed.
 
 ## Privacy and safety model
 
@@ -151,20 +200,26 @@ tool definitions or names. Page URLs in TIR are origin+path only; query strings
 and fragments are stripped from source and frame coverage metadata. Treat
 artifacts as potentially sensitive site-structure data.
 
-Safe exploration is off by default. When enabled it may open `<details>`
-elements by setting local DOM state, yields so reveal handlers can run, and
-restores each element's prior `open` state before returning. `--depth 0`
-performs no exploration. It does not click, submit, fetch, or navigate.
+Safe exploration is off by default. When enabled it sets `<details open>`,
+yields so reveal handlers can run, and restores each element's prior `open`
+state before returning. It does not consult `safeForExploration`. `--depth 0`
+and `--max-operations 0` are sent as JSON zeros and perform no exploration.
+It does not click, submit, fetch, or navigate. Bindings classified `unknown`
+still cannot be marked safe in the schema.
 Stealth behavior is separately opt-in. Cross-origin frame gaps, closed shadow
 roots, suppressed element-level extraction failures, and access interstitials
 are surfaced as diagnostics or warnings rather than hidden. Page-derived tool
 names and descriptions originate in page text and must be treated as untrusted
 model input.
 
-GEO-Visor-owned Chromium launches explicitly disable go-rod's leakless helper
-at runtime. Some antivirus products flag that helper; its module may still
-appear in `go.sum` because it is a transitive go-rod dependency, but GEO-Visor
-does not execute it.
+Launch starts Chromium with `os/exec` (`internal/browser/launch.go`) and reads
+`DevToolsActivePort`. Attach closes GEO-Visor's CDP transport and detaches the
+sessions it opened. Nothing in this module imports `rod/lib/launcher`. The
+`geovisor` binary's import graph does not include `github.com/ysmood/leakless`
+or `github.com/ysmood/fetchup`. `go.mod`'s require block does not list them.
+`go.sum` still has their checksums because `go mod why` reaches them through
+`github.com/go-rod/rod/lib/cdp`'s tests, which import
+`github.com/go-rod/rod/lib/launcher`.
 
 ## Streams and exit status
 
@@ -189,13 +244,13 @@ Ctrl-C cancellation exits with `130`.
 
 ## Compatibility
 
-- Windows: amd64 and arm64 release archives; a Chromium-family browser required.
-- Linux: amd64 and arm64 release archives; a Chromium-family browser required.
-- macOS: amd64 and arm64 release archives; a Chromium-family browser required.
+- Local release scripts target Windows, Linux, and macOS, each for amd64 and
+  arm64. A Chromium-family browser is required for inspection. Those archives
+  are local builds, not published GitHub downloads.
 - Browser extraction uses CDP and is tested with installed Chromium-compatible
   browsers.
 - Source development is pinned by `.go-version` and `.node-version` to Go
-  1.26.6 and Node.js 24.15.0.
+  1.26.9 and Node.js 24.15.0.
 
 ## Performance and reproducibility
 
@@ -212,8 +267,8 @@ comparison checks. See `docs/performance.md`.
   (`chrome://`, `about:blank`) is ignored; open the page first or pass `id:` /
   `url:`.
 - `Chromium executable not found`: install Chrome, Chromium, or Edge, or pass
-  `--browser-executable` with the full path. Auto-detect covers those
-  Chromium-family installs on Windows; `--browser-executable` still wins.
+  `--browser-executable` with the full path. Search order is in
+  `docs/browser-sources.md`. `--browser-executable` still wins.
 - `dom_not_quiet`: increase `--dom-quiet-timeout`; the partial observation is
   still explicit and deterministic for the state that was captured.
 - `frame_uncovered`: the frame disappeared, blocked execution, or could not be
@@ -221,8 +276,8 @@ comparison checks. See `docs/performance.md`.
 - `access_interstitial`: the browser returned a challenge or blocked page.
   GEO-Visor does not bypass it; complete access manually or inspect a permitted
   page.
-- Antivirus leakless alert: use official project builds and verify checksums.
-  GEO-Visor disables leakless at runtime as described above.
+- The same browser diagnostics are copied into TIR `warnings`. Standard error
+  still prints them. Warning codes are listed in `docs/compiler.md`.
 
 ## Contributing and releases
 

@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 )
 
 type sessionClient struct {
 	ctx       context.Context
-	browser   *rod.Browser
+	browser   *cdpBrowser
 	sessionID proto.TargetSessionID
 }
 
@@ -34,7 +33,7 @@ func (client *sessionClient) GetSessionID() proto.TargetSessionID {
 
 func attachTarget(
 	ctx context.Context,
-	browser *rod.Browser,
+	browser *cdpBrowser,
 	targetID proto.TargetTargetID,
 ) (*sessionClient, error) {
 	attached, err := (proto.TargetAttachToTarget{
@@ -47,18 +46,18 @@ func attachTarget(
 	return &sessionClient{ctx: ctx, browser: browser, sessionID: attached.SessionID}, nil
 }
 
-func detachTarget(browser *rod.Browser, sessionID proto.TargetSessionID) {
+func detachTarget(browser *cdpBrowser, sessionID proto.TargetSessionID) {
 	if browser == nil || sessionID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultDOMQuietLimit)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultBrowserControlTimeout)
 	defer cancel()
 	_ = (proto.TargetDetachFromTarget{SessionID: sessionID}).Call(browser.Context(ctx))
 }
 
 func chooseTarget(
 	ctx context.Context,
-	browser *rod.Browser,
+	browser *cdpBrowser,
 	selector TargetSelector,
 ) (*proto.TargetTargetInfo, error) {
 	response, err := (proto.TargetGetTargets{}).Call(browser.Context(ctx))

@@ -11,11 +11,13 @@ import { type LocatorCandidate, messageOf, resolveCandidate } from "./shared/loc
 import { optionIndexByLabel } from "./shared/option";
 
 type ActionKind = "click" | "fill" | "select" | "check";
+type LocatorSelection = "ranked" | "by_target_name";
 
 export interface ActionBinding {
   action: ActionKind;
   inputParameter?: string;
   locatorCandidateIds: string[];
+  locatorSelection?: LocatorSelection;
 }
 
 export interface ToolDefinition {
@@ -50,7 +52,7 @@ export async function executeTool(
     }
     try {
       const element = resolve(definition, binding, input);
-      const value = isFamilyTargetBinding(binding)
+      const value = isByTargetName(binding)
         ? undefined
         : binding.inputParameter
           ? input[binding.inputParameter]
@@ -60,6 +62,7 @@ export async function executeTool(
       throw new Error(
         `GEO-Visor tool ${JSON.stringify(definition.name)} action[${index}] ` +
           `${JSON.stringify(binding.action)} failed: ${messageOf(error)}`,
+        { cause: error },
       );
     }
   }
@@ -78,11 +81,8 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   }
 }
 
-function isFamilyTargetBinding(binding: ActionBinding): boolean {
-  return (
-    binding.inputParameter === "target" &&
-    (binding.action === "click" || binding.action === "check")
-  );
+function isByTargetName(binding: ActionBinding): boolean {
+  return binding.locatorSelection === "by_target_name";
 }
 
 function familyLocatorName(locator: LocatorCandidate | undefined): string {
@@ -115,7 +115,7 @@ function resolve(
   input: Record<string, unknown>,
 ): Element {
   let locatorIDs = binding.locatorCandidateIds;
-  if (isFamilyTargetBinding(binding)) {
+  if (isByTargetName(binding)) {
     const target = String(input[binding.inputParameter ?? ""]);
     const names = familyDisplayNames(definition, locatorIDs);
     locatorIDs = locatorIDs.filter((id) => names.get(id) === target);
@@ -264,6 +264,7 @@ function applyCheck(element: Element, value: unknown): void {
   ) {
     throw new Error("resolved element is not a checkbox or radio input");
   }
-  setNativeProperty(input, "checked", value === undefined ? true : Boolean(value));
+  const checked = typeof value === "boolean" ? value : value === undefined ? true : Boolean(value);
+  setNativeProperty(input, "checked", checked);
   notifyValueChange(element);
 }

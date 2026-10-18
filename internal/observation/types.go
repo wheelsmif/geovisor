@@ -77,10 +77,25 @@ type Interaction struct {
 	Role        string           `json:"role"`
 	Name        string           `json:"name"`
 	Description string           `json:"description,omitempty"`
-	Parameters  []Parameter      `json:"parameters"`
-	Locators    []Locator        `json:"locators"`
-	Actions     []Action         `json:"actions"`
-	Evidence    []Evidence       `json:"evidence"`
+	// InputType is the HTML input type when the element is an input. Reserved
+	// standalone actions (submit, reset, image) use this fact. It is not a CSS
+	// string, so an id such as fn-save cannot be mistaken for a citation.
+	InputType string `json:"inputType,omitempty"`
+	// CitationHref is true when the element is a same-document citation or
+	// fragment link. Low-value detection uses this flag instead of matching
+	// locator CSS.
+	CitationHref bool        `json:"citationHref,omitempty"`
+	Parameters   []Parameter `json:"parameters"`
+	Locators     []Locator   `json:"locators"`
+	Actions      []Action    `json:"actions"`
+	Evidence     []Evidence  `json:"evidence"`
+}
+
+// Input is every observation batch for one browser session. It lives here so
+// the browser package can return observations without importing the compiler.
+type Input struct {
+	Source  Source  `json:"source"`
+	Batches []Batch `json:"batches"`
 }
 
 // Parameter describes an input accepted by an interaction. SourceOrder is the

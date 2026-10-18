@@ -3,10 +3,10 @@ package browser
 import (
 	"context"
 	"errors"
-	"io"
+	"fmt"
 	"os"
+	"time"
 
-	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/wheelsmif/geovisor/internal/observation"
 )
@@ -21,7 +21,7 @@ func (source *source) Observe(ctx context.Context) (Result, error) {
 	return source.observeAttach(ctx)
 }
 
-func (source *source) observeLaunch(parent context.Context) (Result, error) {
+func (source *source) observeLaunch(parent context.Context) (result Result, err error) {
 	ctx, cancel := context.WithTimeout(parent, source.launch.Timeout)
 	defer cancel()
 
@@ -31,7 +31,7 @@ func (source *source) observeLaunch(parent context.Context) (Result, error) {
 		executable, found = LookPath()
 		if !found {
 			return Result{}, sanitizedError(
-				ErrorLaunch, "launch", "Chromium executable not found; set ExecutablePath", nil,
+				ErrorLaunch, "launch", "Chromium executable not found; set the browser executable path (--browser-executable)", nil,
 			)
 		}
 	}
@@ -45,7 +45,11 @@ func (source *source) observeLaunch(parent context.Context) (Result, error) {
 	if err != nil {
 		return Result{}, sanitizedError(ErrorLaunch, "launch.profile", "create isolated profile", err)
 	}
-	defer os.RemoveAll(profile)
+	defer func() {
+		if removeErr := removeBrowserProfile(profile); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove browser profile: %w", removeErr))
+		}
+	}()
 
 	headless := true
 	if source.launch.Headless != nil {
@@ -80,7 +84,7 @@ func (source *source) observeLaunch(parent context.Context) (Result, error) {
 	}
 	defer detachTarget(connection.browser, session.sessionID)
 
-	result, err := observeTarget(ctx, connection.browser, session, created.TargetID, observeTargetOptions{
+	result, err = observeTarget(ctx, connection.browser, session, created.TargetID, observeTargetOptions{
 		requestedURL:   source.launch.URL,
 		navigate:       true,
 		quietPeriod:    source.launch.DOMQuietPeriod,
@@ -140,34 +144,12 @@ func (source *source) observeAttach(parent context.Context) (Result, error) {
 	})
 }
 
-func newOwnedLauncher(
-	ctx context.Context,
-	executable, profile string,
-	headless bool,
-	resolverRules string,
-) *launcher.Launcher {
-	process := launcher.New().
-		Context(ctx).
-		Logger(io.Discard).
-		Bin(executable).
-		UserDataDir(profile).
-		Headless(headless).
-		Leakless(false).
-		Set("site-per-process").
-		Set("disable-features", "TranslateUI").
-		Delete("disable-site-isolation-trials")
-	if resolverRules != "" {
-		process.Set("host-resolver-rules", resolverRules)
-	}
-	return process
-}
-
-func cleanupOwnedBrowser(connection *browserConnection, process *launcher.Launcher) {
+func cleanupOwnedBrowser(connection *browserConnection, process *ownedBrowser) {
 	if process == nil {
 		return
 	}
 	if connection != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), DefaultDOMQuietLimit)
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultBrowserControlTimeout)
 		_ = (proto.BrowserClose{}).Call(connection.browser.Context(ctx))
 		cancel()
 		connection.closeTransport()
@@ -176,7 +158,22 @@ func cleanupOwnedBrowser(connection *browserConnection, process *launcher.Launch
 	// Chromium build. Kill is bounded and safe here because launch mode owns
 	// the entire process tree.
 	process.Kill()
-	process.Cleanup()
+}
+
+// removeBrowserProfile deletes the isolated user-data directory. Chrome can
+// still hold files briefly after the process tree is killed, so a short retry
+// absorbs that race. A failure that survives the retry is returned and joined
+// onto the observe error.
+func removeBrowserProfile(profile string) error {
+	var err error
+	for attempt := 0; attempt < 10; attempt++ {
+		err = os.RemoveAll(profile)
+		if err == nil || os.IsNotExist(err) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return err
 }
 
 func operationError(

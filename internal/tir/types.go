@@ -7,7 +7,18 @@ import (
 )
 
 // SchemaVersion is the only TIR contract version emitted by this package.
-const SchemaVersion = "1.1.0"
+const SchemaVersion = "1.2.0"
+
+// LocatorSelection says how an action's locator candidates are chosen.
+// Ranked candidates are ordered fallbacks for one element. ByTargetName means
+// the parameter value selects one candidate; candidates line up with the enum
+// in document order.
+type LocatorSelection string
+
+const (
+	LocatorSelectionRanked       LocatorSelection = "ranked"
+	LocatorSelectionByTargetName LocatorSelection = "by_target_name"
+)
 
 type SourceKind string
 
@@ -180,10 +191,11 @@ type SemanticNode struct {
 }
 
 type ActionBinding struct {
-	Action              ActionKind `json:"action"`
-	InputParameter      string     `json:"inputParameter,omitempty"`
-	LocatorCandidateIDs []string   `json:"locatorCandidateIds"`
-	SideEffect          SideEffect `json:"sideEffect"`
+	Action              ActionKind       `json:"action"`
+	InputParameter      string           `json:"inputParameter,omitempty"`
+	LocatorCandidateIDs []string         `json:"locatorCandidateIds"`
+	LocatorSelection    LocatorSelection `json:"locatorSelection,omitempty"`
+	SideEffect          SideEffect       `json:"sideEffect"`
 }
 
 type SideEffect struct {
@@ -208,6 +220,44 @@ type Warning struct {
 	ToolID    string           `json:"toolId,omitempty"`
 	FramePath []FrameReference `json:"framePath"`
 }
+
+// Validation error codes. Callers that branch on ValidationError.Code should
+// use these constants.
+const (
+	CodeNilDocument                     = "nil_document"
+	CodeUnsupportedVersion              = "unsupported_version"
+	CodeInvalidSourceKind               = "invalid_source_kind"
+	CodeInvalidExecutionBoundary        = "invalid_execution_boundary"
+	CodeRequired                        = "required"
+	CodeInvalidToolID                   = "invalid_tool_id"
+	CodeDuplicateToolID                 = "duplicate_tool_id"
+	CodeDuplicateParameterName          = "duplicate_parameter_name"
+	CodeMissingLocatorStrategy          = "missing_locator_strategy"
+	CodeInvalidNth                      = "invalid_nth"
+	CodeMissingPathStrategy             = "missing_path_strategy"
+	CodeInvalidActionKind               = "invalid_action_kind"
+	CodeUnknownParameter                = "unknown_parameter"
+	CodeUnknownLocator                  = "unknown_locator"
+	CodeDuplicateLocatorID              = "duplicate_locator_id"
+	CodeDuplicateLocatorReference       = "duplicate_locator_reference"
+	CodeInvalidLocatorSelection         = "invalid_locator_selection"
+	CodeMissingAction                   = "missing_action"
+	CodeInvalidSideEffect               = "invalid_side_effect"
+	CodeUnsafeExploration               = "unsafe_exploration"
+	CodeUnknownTool                     = "unknown_tool"
+	CodeInconsistentCompleteCoverage    = "inconsistent_complete_coverage"
+	CodeMissingPartialCoverage          = "missing_partial_coverage"
+	CodeInconsistentUnavailableCoverage = "inconsistent_unavailable_coverage"
+	CodeInvalidCoverageStatus           = "invalid_coverage_status"
+	CodeDuplicateFramePath              = "duplicate_frame_path"
+	CodeInvalidFrameIndex               = "invalid_frame_index"
+	CodeInvalidValueType                = "invalid_value_type"
+	CodeDuplicateEnumValue              = "duplicate_enum_value"
+	CodeDuplicatePropertyName           = "duplicate_property_name"
+	CodeInvalidConfidence               = "invalid_confidence"
+	CodeIncompatibleShape               = "incompatible_shape"
+	CodeInvalidProvenanceKind           = "invalid_provenance_kind"
+)
 
 // ValidationError is a machine-readable contract violation.
 type ValidationError struct {

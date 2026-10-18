@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/wheelsmif/geovisor/internal/observation"
 )
@@ -311,19 +310,10 @@ func browserExecutable(t *testing.T) string {
 	return ""
 }
 
-func launchExternalBrowser(t *testing.T, executable string) (*launcher.Launcher, string) {
+func launchExternalBrowser(t *testing.T, executable string) (*ownedBrowser, string) {
 	t.Helper()
-	profile := t.TempDir()
-	process := launcher.New().
-		Context(context.Background()).
-		Logger(io.Discard).
-		Bin(executable).
-		UserDataDir(filepath.Join(profile, "chromium-profile")).
-		Headless(true).
-		Leakless(false).
-		Set("site-per-process").
-		Set("disable-features", "TranslateUI").
-		Delete("disable-site-isolation-trials")
+	profile := filepath.Join(t.TempDir(), "chromium-profile")
+	process := newOwnedLauncher(context.Background(), executable, profile, true, "")
 	controlURL, err := process.Launch()
 	if err != nil {
 		t.Fatalf("launch fixture Chromium: %v", err)
@@ -331,14 +321,38 @@ func launchExternalBrowser(t *testing.T, executable string) (*launcher.Launcher,
 	return process, controlURL
 }
 
-func cleanupExternalBrowser(process *launcher.Launcher, controlURL string) {
+func cleanupExternalBrowser(process *ownedBrowser, controlURL string) {
 	connection, err := connectBrowser(context.Background(), controlURL)
 	if err == nil {
-		_ = (proto.BrowserClose{}).Call(connection.browser)
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultBrowserControlTimeout)
+		_ = (proto.BrowserClose{}).Call(connection.browser.Context(ctx))
+		cancel()
 		connection.closeTransport()
 	}
 	process.Kill()
-	process.Cleanup()
+	_ = removeBrowserProfile(process.profile)
+}
+
+func TestLaunchObservesHTTP404HTML(t *testing.T) {
+	executable := browserExecutable(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+		writer.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(writer, `<!doctype html><button>Missing page</button>`)
+	}))
+	defer server.Close()
+
+	source, err := NewLaunch(LaunchOptions{
+		URL: server.URL, ExecutablePath: executable, Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new launch source: %v", err)
+	}
+	result, err := source.Observe(context.Background())
+	if err != nil {
+		t.Fatalf("observe HTTP 404 HTML: %v", err)
+	}
+	assertInteraction(t, result.Input.Batches[0].Interactions, "Missing page", 0)
 }
 
 func assertInteraction(

@@ -95,6 +95,7 @@ func validNthDocument() *tir.Document {
 		Actions: []tir.ActionBinding{{
 			Action:              tir.ActionFill,
 			LocatorCandidateIDs: []string{"query-locator"},
+			LocatorSelection:    tir.LocatorSelectionRanked,
 			SideEffect:          tir.SideEffect{Class: tir.SideEffectUnknown},
 		}},
 		Confidence: tir.Confidence{Score: 1},

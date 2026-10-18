@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/cdp"
+	"github.com/go-rod/rod/lib/proto"
 )
 
 const (
@@ -36,8 +36,32 @@ func newEndpointClient() *http.Client {
 	}
 }
 
+// cdpBrowser is the proto client for one CDP socket. It does not use the rod
+// root package: that package's Browser.Connect reaches rod/lib/launcher.
+type cdpBrowser struct {
+	ctx    context.Context
+	client *cdp.Client
+}
+
+func (browser *cdpBrowser) Call(ctx context.Context, sessionID, method string, params interface{}) ([]byte, error) {
+	return browser.client.Call(ctx, sessionID, method, params)
+}
+
+func (browser *cdpBrowser) GetContext() context.Context {
+	if browser == nil || browser.ctx == nil {
+		return context.Background()
+	}
+	return browser.ctx
+}
+
+func (browser *cdpBrowser) Context(ctx context.Context) *cdpBrowser {
+	clone := *browser
+	clone.ctx = ctx
+	return &clone
+}
+
 type browserConnection struct {
-	browser *rod.Browser
+	browser *cdpBrowser
 	socket  *cdp.WebSocket
 }
 
@@ -47,8 +71,13 @@ func connectBrowser(ctx context.Context, controlURL string) (*browserConnection,
 		return nil, err
 	}
 	client := cdp.New().Start(socket)
-	instance := rod.New().Context(ctx).Client(client).NoDefaultDevice()
-	if err := instance.Connect(); err != nil {
+	// CDP events must be consumed or the socket reader blocks.
+	go func() {
+		for range client.Event() {
+		}
+	}()
+	instance := &cdpBrowser{ctx: ctx, client: client}
+	if err := (proto.TargetSetDiscoverTargets{Discover: true}).Call(instance); err != nil {
 		_ = socket.Close()
 		return nil, err
 	}

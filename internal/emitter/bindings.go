@@ -8,7 +8,7 @@ import (
 	"github.com/wheelsmif/geovisor/internal/tir"
 )
 
-const bindingSchemaVersion = "1.0.0"
+const bindingSchemaVersion = "1.1.0"
 
 type bindingArtifact struct {
 	SchemaVersion string              `json:"schemaVersion"`
@@ -22,10 +22,11 @@ type toolBindingRecipe struct {
 }
 
 type actionBindingRecipe struct {
-	Action         tir.ActionKind         `json:"action"`
-	InputParameter string                 `json:"inputParameter,omitempty"`
-	SideEffect     tir.SideEffect         `json:"sideEffect"`
-	Locators       []tir.LocatorCandidate `json:"locatorCandidates"`
+	Action           tir.ActionKind         `json:"action"`
+	InputParameter   string                 `json:"inputParameter,omitempty"`
+	LocatorSelection tir.LocatorSelection   `json:"locatorSelection,omitempty"`
+	SideEffect       tir.SideEffect         `json:"sideEffect"`
+	Locators         []tir.LocatorCandidate `json:"locatorCandidates"`
 }
 
 // BindingArtifact emits the deterministic browser-action companion used by
@@ -70,10 +71,11 @@ func bindingArtifactForCanonical(
 		}
 		for ai, action := range tool.Actions {
 			actionRecipe := actionBindingRecipe{
-				Action:         action.Action,
-				InputParameter: action.InputParameter,
-				SideEffect:     action.SideEffect,
-				Locators:       make([]tir.LocatorCandidate, 0, len(action.LocatorCandidateIDs)),
+				Action:           action.Action,
+				InputParameter:   action.InputParameter,
+				LocatorSelection: action.LocatorSelection,
+				SideEffect:       action.SideEffect,
+				Locators:         make([]tir.LocatorCandidate, 0, len(action.LocatorCandidateIDs)),
 			}
 			for ri, locatorID := range action.LocatorCandidateIDs {
 				locator, ok := locators[locatorID]

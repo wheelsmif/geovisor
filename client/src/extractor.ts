@@ -39,8 +39,14 @@ import { isCitationFragment, isLowValueName } from "./shared/low-value";
 import { accessibleName, type NameSource } from "./shared/name";
 import { optionLabels } from "./shared/option";
 
-/** Per-call @medv/finder budget. Exhaustion falls back to simpleSelector. */
-const FINDER_TIMEOUT_MS = 50;
+/**
+ * @medv/finder path-check budget. The wall-clock timeout is disabled so a slow
+ * machine cannot change the selector; exhaustion still falls back to simpleSelector.
+ */
+const FINDER_PATH_CHECKS = 5_000;
+
+/** Interactions recorded in one frame before extraction stops and reports partial coverage. */
+const MAX_INTERACTIONS_PER_FRAME = 2_000;
 
 /** Custom widgets the runtime can operate as a click, not a native apply. */
 const CLICKABLE_CUSTOM_ROLES = new Set(["checkbox", "radio", "switch"]);
@@ -242,10 +248,10 @@ function cssFallback(element: Element): string {
       className: () => false,
       idName: () => false,
       tagName: () => true,
-      timeoutMs: FINDER_TIMEOUT_MS,
+      timeoutMs: Number.POSITIVE_INFINITY,
       seedMinLength: 1,
       optimizedMinLength: 2,
-      maxNumberOfPathChecks: 5_000,
+      maxNumberOfPathChecks: FINDER_PATH_CHECKS,
     }),
   );
   if (found !== fallback && selectorUniquelyMatches(scoped, found, element)) {
@@ -690,6 +696,8 @@ function actionInteraction(record: ElementRecord): Interaction {
     ...(identity.description ? { description: identity.description } : {}),
     parameters: [],
     locators: identity.locators,
+    ...(record.element.localName === "input" ? { inputType: inputType(record.element) } : {}),
+    ...(isCitationHref(record.element) ? { citationHref: true } : {}),
     actions: [
       {
         kind: "click",
@@ -909,13 +917,21 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
     const interactions: Interaction[] = [];
     let elementFailures = 0;
     let omittedCustom = 0;
+    let droppedLowValue = 0;
+    let interactionLimitReached = false;
     for (const record of records) {
+      if (interactions.length >= MAX_INTERACTIONS_PER_FRAME) {
+        interactionLimitReached = true;
+        break;
+      }
       if (record.hidden || record.disabled) continue;
       const element = record.element;
       try {
         // The branches are exclusive: one record must not yield two interactions.
         if (element instanceof HTMLFormElement) {
-          interactions.push(formInteraction(record, formMemberIndex.get(element) ?? []));
+          const members = formMemberIndex.get(element) ?? [];
+          if (members.length === 0) continue;
+          interactions.push(formInteraction(record, members));
         } else if (claimed.has(element)) {
           // Already a parameter of its form's tool.
         } else if (isOmittedCustomWidget(element)) {
@@ -926,6 +942,7 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
           interactions.push(interaction);
         } else if (isAction(element)) {
           if (isLowValueAction(element)) {
+            droppedLowValue++;
             continue;
           }
           const interaction = actionInteraction(record);
@@ -952,6 +969,18 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
       warnings.push({
         code: "custom_control_omitted",
         message: `${omittedCustom} custom widget(s) have no apply path and were omitted`,
+      });
+    }
+    if (droppedLowValue > 0) {
+      warnings.push({
+        code: "dropped_low_value_action",
+        message: `${droppedLowValue} low-value action(s) have no useful capability and were omitted`,
+      });
+    }
+    if (interactionLimitReached) {
+      warnings.push({
+        code: "interaction_limit",
+        message: `stopped after ${MAX_INTERACTIONS_PER_FRAME} interactions in this frame`,
       });
     }
 

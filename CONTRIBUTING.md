@@ -2,7 +2,10 @@
 
 ## Development setup
 
-Install Go 1.26.6, Node.js 24.15.0, npm, and a Chromium-compatible browser.
+Install Go 1.26.9 (`.go-version`; `go.mod` has `toolchain go1.26.9`), Node.js
+24.15.0, npm, and a Chromium-compatible browser. `go build` and `go install`
+do not need Node; the extractor bundle is committed. Node is required for
+client edits and for the check scripts below.
 Then run:
 
 ```sh
@@ -13,7 +16,10 @@ go vet ./...
 ```
 
 `./scripts/check.sh` and `./scripts/check.ps1` set `GEOVISOR_REQUIRE_NODE=1`
-after `npm` succeeds so the apply round-trip harness cannot skip. Use
+after `npm` succeeds so the apply round-trip harness cannot skip. Both run
+`go tool -modfile=tools/go.mod staticcheck ./...` on every invocation, and
+`go tool -modfile=tools/go.mod govulncheck ./...` when `--security` or
+`-Security` is set. Use
 `GEOVISOR_REQUIRE_BROWSER=1 go test ./...` when Chromium integration is
 required. On PowerShell:
 
@@ -73,8 +79,11 @@ Run all local checks with `./scripts/check.sh` or
 dependency scanning.
 
 CI does not run that exact script. The Quality matrix runs formatters, `go vet`,
-`staticcheck`, `npm` checks, and `go test ./...` (with Node required; Chromium
-required only on the Ubuntu Quality leg). `verify-release` and the six-archive
+`go tool -modfile=tools/go.mod staticcheck ./...`, `npm` checks, and
+`go test ./...` (with Node required; Chromium required only on the Ubuntu
+Quality leg). The Linux race and security job runs
+`go tool -modfile=tools/go.mod govulncheck ./...` and
+`npm audit --audit-level=high`. `verify-release` and the six-archive
 checksums run in the Source cross-build job. Chromium-backed packages also run
 in the dedicated Browser job, which asserts `google-chrome --version` first.
 
@@ -99,9 +108,10 @@ or:
 ```
 
 Local release scripts cross-compile with `CGO_ENABLED=0` into ignored `dist/`
-archives. Do not run or enable go-rod leakless in release commands. Only a
-native binary's version output may be executed; cross-compiled binaries are
-validated by successful builds and checksums.
+archives. They compile from a `git archive` of `HEAD` and do not start
+Chromium. Only a native binary's version output may be executed;
+cross-compiled binaries are validated by successful builds and checksums.
+See `docs/releasing.md`.
 
 ## Issues and changes
 

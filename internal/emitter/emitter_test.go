@@ -144,6 +144,26 @@ func TestOpenAIStrictOptionalityAndNestedObjects(t *testing.T) {
 	assertStrings(t, propertySchema(t, items, "value")["type"], []string{"string", "null"})
 }
 
+func TestOpenAIUsesNameWhenDescriptionIsEmpty(t *testing.T) {
+	t.Parallel()
+	document := annotationDocument(tir.SideEffectNone)
+	document.Tools[0].Name = "Save"
+	document.Tools[0].Description = "   "
+	result, err := (OpenAI{}).Emit(context.Background(), document, Options{})
+	if err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	var tools []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(result.Primary.Data, &tools); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Description != "Save" {
+		t.Fatalf("description = %#v, want the tool name", tools)
+	}
+}
+
 func TestMCPConservativeAnnotations(t *testing.T) {
 	t.Parallel()
 
@@ -163,15 +183,19 @@ func TestMCPConservativeAnnotations(t *testing.T) {
 	if len(manifest.Tools) != 2 {
 		t.Fatalf("tool count = %d", len(manifest.Tools))
 	}
-	if got := manifest.Tools[0].Annotations; got != (mcpAnnotations{
+	byName := map[string]mcpAnnotations{}
+	for _, tool := range manifest.Tools {
+		byName[tool.Name] = tool.Annotations
+	}
+	if got := byName["complex_tool"]; got != (mcpAnnotations{
 		ReadOnlyHint: false, DestructiveHint: true, IdempotentHint: false, OpenWorldHint: true,
 	}) {
 		t.Fatalf("complex annotations = %#v", got)
 	}
-	if got := manifest.Tools[1].Annotations; got != (mcpAnnotations{
-		ReadOnlyHint: false, DestructiveHint: true, IdempotentHint: false, OpenWorldHint: false,
+	if got := byName["read_only"]; got != (mcpAnnotations{
+		ReadOnlyHint: false, DestructiveHint: false, IdempotentHint: false, OpenWorldHint: false,
 	}) {
-		t.Fatalf("click annotations = %#v", got)
+		t.Fatalf("read-only annotations = %#v", got)
 	}
 }
 
@@ -179,16 +203,17 @@ func TestAnnotationDerivationForEverySideEffect(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		sideEffect tir.SideEffectClass
-		readOnly   bool
-		openWorld  bool
+		sideEffect  tir.SideEffectClass
+		readOnly    bool
+		destructive bool
+		openWorld   bool
 	}{
 		{sideEffect: tir.SideEffectNone, readOnly: false},
 		{sideEffect: tir.SideEffectLocalState},
-		{sideEffect: tir.SideEffectNetwork, openWorld: true},
-		{sideEffect: tir.SideEffectNavigation, openWorld: true},
-		{sideEffect: tir.SideEffectSubmission, openWorld: true},
-		{sideEffect: tir.SideEffectUnknown, openWorld: true},
+		{sideEffect: tir.SideEffectNetwork, destructive: true, openWorld: true},
+		{sideEffect: tir.SideEffectNavigation, destructive: true, openWorld: true},
+		{sideEffect: tir.SideEffectSubmission, destructive: true, openWorld: true},
+		{sideEffect: tir.SideEffectUnknown, destructive: true, openWorld: true},
 	}
 	for _, test := range tests {
 		test := test
@@ -212,7 +237,7 @@ func TestAnnotationDerivationForEverySideEffect(t *testing.T) {
 			}
 			mcp := manifest.Tools[0].Annotations
 			if mcp.ReadOnlyHint != test.readOnly ||
-				mcp.DestructiveHint != !test.readOnly ||
+				mcp.DestructiveHint != test.destructive ||
 				mcp.IdempotentHint != test.readOnly ||
 				mcp.OpenWorldHint != test.openWorld {
 				t.Fatalf("MCP annotations = %#v", mcp)
@@ -240,11 +265,20 @@ func TestCompanionBindingsAreSeparateAndResolved(t *testing.T) {
 			if decoded.SchemaVersion != bindingSchemaVersion || decoded.Target != target {
 				t.Fatalf("binding header = %#v", decoded)
 			}
-			if len(decoded.Tools) != 2 || len(decoded.Tools[0].Actions) != 2 {
+			if len(decoded.Tools) != 2 {
 				t.Fatalf("unexpected recipes: %#v", decoded.Tools)
 			}
-			for _, action := range decoded.Tools[0].Actions {
-				if len(action.Locators) != 1 || action.Locators[0].ID == "" {
+			var complex *toolBindingRecipe
+			for i := range decoded.Tools {
+				if decoded.Tools[i].ToolID == "complex_tool" {
+					complex = &decoded.Tools[i]
+				}
+			}
+			if complex == nil || len(complex.Actions) != 2 {
+				t.Fatalf("unexpected recipes: %#v", decoded.Tools)
+			}
+			for _, action := range complex.Actions {
+				if action.LocatorSelection != tir.LocatorSelectionRanked || len(action.Locators) != 1 || action.Locators[0].ID == "" {
 					t.Fatalf("unresolved action recipe: %#v", action)
 				}
 			}
@@ -380,7 +414,7 @@ func TestEmitterSchemasUseJSONSchema202012(t *testing.T) {
 
 	for _, name := range []string{
 		"emitter-bindings.schema.json",
-		"mcp-tools-list-2026-07-28.schema.json",
+		"mcp-tools-list-" + MCPSpecVersion + ".schema.json",
 		"openai-function-tools.schema.json",
 	} {
 		data, err := os.ReadFile(filepath.Join("..", "..", "schemas", name))
@@ -444,6 +478,7 @@ func annotationDocument(class tir.SideEffectClass) *tir.Document {
 		Actions: []tir.ActionBinding{{
 			Action:              tir.ActionClick,
 			LocatorCandidateIDs: []string{"hint-locator"},
+			LocatorSelection:    tir.LocatorSelectionRanked,
 			SideEffect:          tir.SideEffect{Class: class, SafeForExploration: safe},
 		}},
 		Confidence: tir.Confidence{Score: 1},
@@ -579,6 +614,7 @@ func fixtureDocument() *tir.Document {
 			Actions: []tir.ActionBinding{{
 				Action:              tir.ActionClick,
 				LocatorCandidateIDs: []string{"read-control"},
+				LocatorSelection:    tir.LocatorSelectionRanked,
 				SideEffect:          tir.SideEffect{Class: tir.SideEffectNone, SafeForExploration: true},
 			}},
 			Confidence: tir.Confidence{Score: 1},
@@ -675,11 +711,13 @@ func fixtureDocument() *tir.Document {
 					Action:              tir.ActionFill,
 					InputParameter:      "query",
 					LocatorCandidateIDs: []string{"query-input"},
+					LocatorSelection:    tir.LocatorSelectionRanked,
 					SideEffect:          tir.SideEffect{Class: tir.SideEffectNone, SafeForExploration: true},
 				},
 				{
 					Action:              tir.ActionClick,
 					LocatorCandidateIDs: []string{"submit-button"},
+					LocatorSelection:    tir.LocatorSelectionRanked,
 					SideEffect: tir.SideEffect{
 						Class:              tir.SideEffectSubmission,
 						SafeForExploration: false,

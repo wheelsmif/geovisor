@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -796,6 +797,31 @@ func formatStrings(formats []emitter.Format) []string {
 		result[index] = string(format)
 	}
 	return result
+}
+
+func TestSafeExploreDepthZeroStaysInPayloadJSON(t *testing.T) {
+	t.Parallel()
+	var got browser.LaunchOptions
+	dependencies := successfulDependencies()
+	dependencies.NewLaunch = func(options browser.LaunchOptions) (browser.BrowserSource, error) {
+		got = options
+		return stubSource{}, nil
+	}
+	err := RunWithDependencies(context.Background(), []string{
+		"inspect", "https://example.test/",
+		"--safe-explore", "--depth", "0", "--max-operations", "0",
+	}, &bytes.Buffer{}, &bytes.Buffer{}, dependencies)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	payload, err := json.Marshal(got.Extraction)
+	if err != nil {
+		t.Fatalf("marshal extraction payload: %v", err)
+	}
+	text := string(payload)
+	if !strings.Contains(text, `"maxDepth":0`) || !strings.Contains(text, `"maxOperations":0`) {
+		t.Fatalf("payload = %s, want explicit zero depth and operations", text)
+	}
 }
 
 type stallWriter struct{}

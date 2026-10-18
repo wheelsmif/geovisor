@@ -62,7 +62,7 @@ func WriteFiles(ctx context.Context, files []File) error {
 	return writeFiles(ctx, files, productionOps())
 }
 
-func writeFiles(ctx context.Context, files []File, ops fileOps) error {
+func writeFiles(ctx context.Context, files []File, ops fileOps) (err error) {
 	if ctx == nil {
 		return errors.New("output context must not be nil")
 	}
@@ -76,28 +76,40 @@ func writeFiles(ctx context.Context, files []File, ops fileOps) error {
 	staged := make([]stagedFile, 0, len(files))
 	replacements := make([]replacement, 0, len(files))
 	committed := false
-	cleanup := func() {
+	cleanup := func() error {
 		if committed {
-			return
+			return nil
 		}
+		var errs []error
 		for _, file := range staged {
 			if file.temp != "" {
-				_ = os.Remove(file.temp)
+				if removeErr := os.Remove(file.temp); removeErr != nil && !os.IsNotExist(removeErr) {
+					errs = append(errs, fmt.Errorf("remove staged output %q: %w", file.temp, removeErr))
+				}
 			}
 		}
 		for _, item := range replacements {
 			if item.replaced {
 				if item.backup != "" {
-					_ = ops.replace(item.backup, item.target)
-				} else {
-					_ = os.Remove(item.target)
+					if replaceErr := ops.replace(item.backup, item.target); replaceErr != nil {
+						errs = append(errs, fmt.Errorf("restore output %q: %w", item.target, replaceErr))
+					}
+				} else if removeErr := os.Remove(item.target); removeErr != nil && !os.IsNotExist(removeErr) {
+					errs = append(errs, fmt.Errorf("remove output %q: %w", item.target, removeErr))
 				}
 			} else if item.backup != "" {
-				_ = os.Remove(item.backup)
+				if removeErr := os.Remove(item.backup); removeErr != nil && !os.IsNotExist(removeErr) {
+					errs = append(errs, fmt.Errorf("remove backup %q: %w", item.backup, removeErr))
+				}
 			}
 		}
+		return errors.Join(errs...)
 	}
-	defer cleanup()
+	defer func() {
+		if cleanupErr := cleanup(); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
+	}()
 
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -158,14 +170,17 @@ func writeFiles(ctx context.Context, files []File, ops fileOps) error {
 			return fmt.Errorf("sync output directory %q: %w", parent, err)
 		}
 	}
+	committed = true
+	var backupErrs []error
 	for _, item := range replacements {
 		if item.backup != "" {
-			_ = os.Remove(item.backup)
+			if removeErr := os.Remove(item.backup); removeErr != nil && !os.IsNotExist(removeErr) {
+				backupErrs = append(backupErrs, fmt.Errorf("remove backup %q: %w", item.backup, removeErr))
+			}
 		}
 	}
 	replacements = replacements[:0]
-	committed = true
-	return nil
+	return errors.Join(backupErrs...)
 }
 
 // ValidateFiles rejects empty paths and colliding destinations. The CLI uses
@@ -209,7 +224,9 @@ func stageFile(directory, base string, data []byte) (path string, returnedError 
 	defer func() {
 		if returnedError != nil {
 			_ = file.Close()
-			_ = os.Remove(path)
+			if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+				returnedError = errors.Join(returnedError, fmt.Errorf("remove staged output %q: %w", path, removeErr))
+			}
 		}
 	}()
 	if err := file.Chmod(filePermission); err != nil {

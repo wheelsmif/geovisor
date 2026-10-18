@@ -133,7 +133,7 @@ func newRootCommand(stdout, stderr io.Writer, dependencies Dependencies) *cobra.
 		Short:         "Deterministic browser-to-contract tooling",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		Version:       version.Version,
+		Version:       version.Current(),
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return nil
@@ -194,7 +194,7 @@ func newInspectCommand(stdout, stderr io.Writer, dependencies Dependencies) *cob
 	flags.IntVar(&options.Depth, "depth", options.Depth, "safe exploration depth (0 = none, 1-16 = nested <details> levels)")
 	flags.IntVar(&options.MaxOperations, "max-operations", options.MaxOperations, "safe exploration operation limit (0-500)")
 	flags.DurationVar(&options.ExplorationTimeout, "exploration-timeout", options.ExplorationTimeout, "safe exploration time limit")
-	flags.DurationVar(&options.FrameTimeout, "frame-timeout", 0, "per-frame extraction deadline (default: exploration timeout plus selector allowance)")
+	flags.DurationVar(&options.FrameTimeout, "frame-timeout", 0, "per-frame extraction deadline (default: exploration timeout plus selector allowance plus frame overhead)")
 	flags.BoolVar(&options.SafeExplore, "safe-explore", false, "enable non-navigating, non-submitting safe exploration")
 	flags.BoolVar(&options.Headful, "headful", false, "show launched Chromium")
 	flags.BoolVar(&options.Stealth, "stealth", false, "opt in to limited automation-marker removal")

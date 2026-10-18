@@ -191,6 +191,7 @@ function toolDefinition(tool) {
     actions: (tool.actionBindings ?? []).map((action) => ({
       action: action.action,
       inputParameter: action.inputParameter,
+      locatorSelection: action.locatorSelection,
       locatorCandidateIds: action.locatorCandidateIds ?? [],
     })),
     locators: tool.locatorCandidates ?? [],

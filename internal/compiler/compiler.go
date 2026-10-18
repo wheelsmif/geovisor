@@ -22,11 +22,27 @@ import (
 
 var disambiguatedName = regexp.MustCompile(` \(\d+\)$`)
 
-// Input contains every observation batch for one browser session.
-type Input struct {
-	Source  observation.Source
-	Batches []observation.Batch
-}
+// Input is every observation batch for one browser session. The type is
+// defined in observation so the browser package does not import compiler.
+type Input = observation.Input
+
+// Compiler error codes. Callers that branch on Error.Code should use these
+// constants.
+const (
+	CodeCanceled               = "canceled"
+	CodeRequired               = "required"
+	CodeInvalidInteractionKind = "invalid_interaction_kind"
+	CodeInvalidLocatorIndex    = "invalid_locator_index"
+	CodeInvalidNth             = "invalid_nth"
+	CodeInvalidConfidence      = "invalid_confidence"
+	CodeInvalidSourceKind      = "invalid_source_kind"
+	CodeInvalidValueType       = "invalid_value_type"
+	CodeInvalidActionKind      = "invalid_action_kind"
+	CodeInvalidSideEffect      = "invalid_side_effect"
+	CodeUnsafeExploration      = "unsafe_exploration"
+	CodeInvalidProvenanceKind  = "invalid_provenance_kind"
+	CodeMarshalFailed          = "marshal_failed"
+)
 
 // Error identifies malformed raw input at the compiler boundary.
 type Error struct {
@@ -46,10 +62,10 @@ func (e *Error) Unwrap() error {
 
 func compileContext(ctx context.Context) error {
 	if ctx == nil {
-		return &Error{Field: "context", Code: "canceled", Message: "context must not be nil"}
+		return &Error{Field: "context", Code: CodeCanceled, Message: "context must not be nil"}
 	}
 	if err := ctx.Err(); err != nil {
-		return &Error{Field: "context", Code: "canceled", Message: err.Error(), err: err}
+		return &Error{Field: "context", Code: CodeCanceled, Message: err.Error(), err: err}
 	}
 	return nil
 }
@@ -64,7 +80,9 @@ type toolAccumulator struct {
 	descriptions []string
 	parameters   map[string]*parameterAccumulator
 	locators     map[string]*locatorAccumulator
+	locatorOrder []string
 	actions      map[string]*actionAccumulator
+	actionOrder  []string
 	evidence     map[string]observation.Evidence
 	warnings     []pendingWarning
 }
@@ -111,9 +129,10 @@ type compiledTool struct {
 	tool tir.Tool
 }
 
-// Compile aggregates all batches without relying on input order. Equivalent
-// evidence is deduplicated, while frame path and semantic scope remain part of
-// interaction identity.
+// Compile emits tools, parameters, actions, and enum values in document order.
+// Equivalent evidence is deduplicated. Frame path and semantic scope remain
+// part of interaction identity. Set-like collections (warnings, frame coverage,
+// provenance) get one stable order here; tir.Canonical does not sort them again.
 func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 	if err := compileContext(ctx); err != nil {
 		return nil, err
@@ -130,6 +149,7 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 	})
 
 	tools := make(map[string]*toolAccumulator)
+	var toolOrder []string
 	frames := make(map[string]*frameAccumulator)
 	var warnings []pendingWarning
 	var preparedItems []preparedItem
@@ -156,7 +176,7 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 			if frame.Accessible {
 				accumulator.accessible = true
 				accumulator.urls = appendNonempty(accumulator.urls, pageurl.PageURL(frame.URL))
-				accumulator.origins = appendNonempty(accumulator.origins, cleanText(frame.Origin))
+				accumulator.origins = appendNonempty(accumulator.origins, pageurl.NormalizeSecurityOrigin(frame.Origin, frame.URL))
 			} else {
 				accumulator.inaccessible = true
 				reason := cleanText(frame.Reason)
@@ -175,10 +195,10 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 			code := cleanText(warning.Code)
 			message := cleanText(warning.Message)
 			if code == "" {
-				return nil, &Error{Field: field + ".code", Code: "required", Message: "must not be empty"}
+				return nil, &Error{Field: field + ".code", Code: CodeRequired, Message: "must not be empty"}
 			}
 			if message == "" {
-				return nil, &Error{Field: field + ".message", Code: "required", Message: "must not be empty"}
+				return nil, &Error{Field: field + ".message", Code: CodeRequired, Message: "must not be empty"}
 			}
 			warnings = append(warnings, pendingWarning{
 				code:      code,
@@ -235,6 +255,7 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 				evidence:     make(map[string]observation.Evidence),
 			}
 			tools[prepared.identity] = accumulator
+			toolOrder = append(toolOrder, prepared.identity)
 		}
 		accumulator.names = append(accumulator.names, prepared.names...)
 		accumulator.descriptions = append(accumulator.descriptions, prepared.descriptions...)
@@ -247,7 +268,7 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 	}
 
 	compileCoverage(document, coverageReported, frames, &warnings)
-	compiled, toolIDs := compileTools(tools, &warnings)
+	compiled, toolIDs := compileTools(toolOrder, tools, &warnings)
 	document.Tools = make([]tir.Tool, len(compiled))
 	for i := range compiled {
 		document.Tools[i] = compiled[i].tool
@@ -310,7 +331,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 	case observation.InteractionForm, observation.InteractionControl, observation.InteractionAction:
 	default:
 		return result, nil, &Error{
-			Field: field + ".kind", Code: "invalid_interaction_kind",
+			Field: field + ".kind", Code: CodeInvalidInteractionKind,
 			Message: "must be form, control, or action",
 		}
 	}
@@ -329,7 +350,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 		})
 	}
 	result.names = []string{name}
-	result.descriptions = appendNonempty(nil, cleanText(source.Description))
+	result.descriptions = appendNonempty(nil, cleanDescription(source.Description))
 
 	for i, evidence := range source.Evidence {
 		if err := validateEvidence(fmt.Sprintf("%s.evidence[%d]", field, i), evidence); err != nil {
@@ -353,7 +374,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 		}
 		if compiled.Name == "" {
 			return result, nil, &Error{
-				Field: fmt.Sprintf("%s.parameters[%d].name", field, i), Code: "required",
+				Field: fmt.Sprintf("%s.parameters[%d].name", field, i), Code: CodeRequired,
 				Message: "parameter name must not be empty",
 			}
 		}
@@ -377,22 +398,13 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 			return result, nil, err
 		}
 		locatorField := fmt.Sprintf("%s.locators[%d]", field, i)
-		key, err := marshalIdentity(locatorField, struct {
-			FramePath  []tir.PathNode
-			ShadowPath []tir.PathNode
-			Semantic   *tir.SemanticLocator
-			CSS        string
-		}{compiled.FramePath, compiled.ShadowPath, compiled.Semantic, compiled.CSSFallback})
-		if err != nil {
-			return result, nil, err
-		}
 		identityKey, err := locatorIdentityKey(locatorField, compiled)
 		if err != nil {
 			return result, nil, err
 		}
-		locatorKeys[i] = key
+		locatorKeys[i] = identityKey
 		identityLocatorKeys[i] = identityKey
-		result.locators = append(result.locators, preparedLocator{key: key, value: compiled, evidence: evidence})
+		result.locators = append(result.locators, preparedLocator{key: identityKey, value: compiled, evidence: evidence})
 		if compiled.Semantic == nil && compiled.CSSFallback != "" {
 			warnings = append(warnings, pendingWarning{
 				code: "css_fallback", message: "locator relies only on a CSS fallback",
@@ -423,7 +435,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 				if index < 0 || index >= len(locatorKeys) {
 					return result, nil, &Error{
 						Field: fmt.Sprintf("%s.locatorIndexes[%d]", actionField, j),
-						Code:  "invalid_locator_index", Message: "must reference a locator in the same interaction",
+						Code:  CodeInvalidLocatorIndex, Message: "must reference a locator in the same interaction",
 					}
 				}
 				selected = append(selected, locatorKeys[index])
@@ -436,7 +448,7 @@ func prepareInteraction(field string, source observation.Interaction) (preparedI
 			SideEffect: tir.SideEffect{
 				Class:              tir.SideEffectClass(action.SideEffect.Class),
 				SafeForExploration: action.SideEffect.SafeForExploration,
-				Rationale:          cleanText(action.SideEffect.Rationale),
+				Rationale:          cleanDescription(action.SideEffect.Rationale),
 			},
 		}
 		key := actionIdentity(compiled, selected)
@@ -488,6 +500,7 @@ func mergePreparedInteraction(target *toolAccumulator, source preparedInteractio
 				key: locator.key, locator: value, evidence: make(map[string]observation.Evidence),
 			}
 			target.locators[locator.key] = accumulator
+			target.locatorOrder = append(target.locatorOrder, locator.key)
 		}
 		mergeEvidence(accumulator.evidence, locator.evidence)
 	}
@@ -499,6 +512,7 @@ func mergePreparedInteraction(target *toolAccumulator, source preparedInteractio
 				classes: make(map[tir.SideEffectClass]struct{}), allSafe: true,
 			}
 			target.actions[action.key] = accumulator
+			target.actionOrder = append(target.actionOrder, action.key)
 		}
 		accumulator.locatorKeys = sortedUniqueStrings(append(accumulator.locatorKeys, action.locatorKeys...))
 		accumulator.classes[action.value.SideEffect.Class] = struct{}{}
@@ -507,8 +521,10 @@ func mergePreparedInteraction(target *toolAccumulator, source preparedInteractio
 	}
 }
 
-func compileTools(accumulators map[string]*toolAccumulator, warnings *[]pendingWarning) ([]compiledTool, map[string]string) {
-	keys := sortedMapKeys(accumulators)
+func compileTools(order []string, accumulators map[string]*toolAccumulator, warnings *[]pendingWarning) ([]compiledTool, map[string]string) {
+	// Document order: tools follow the first observation that produced each
+	// identity, not tool ID.
+	keys := order
 	ids := stableIDs(keys, func(key string) string {
 		accumulator := accumulators[key]
 		name := chooseDisplay(accumulator.names)
@@ -534,7 +550,7 @@ func compileTools(accumulators map[string]*toolAccumulator, warnings *[]pendingW
 		tool.Locators = compileLocators(accumulator, idByLocator)
 		if accumulator.family {
 			tool.Name = familyDisplayName(accumulator.role, accumulator.familyAction)
-			tool.Description = familyToolDescription()
+			tool.Description = familyToolDescription(accumulator.role, accumulator.familyAction)
 			tool.Parameters = []tir.Parameter{familyTargetParameterSpec(tool.Locators)}
 		} else {
 			tool.Parameters = compileParameters(accumulator, warnings)
@@ -542,7 +558,6 @@ func compileTools(accumulators map[string]*toolAccumulator, warnings *[]pendingW
 		tool.Actions = compileActions(accumulator, idByLocator, tool.Locators, warnings)
 		result = append(result, compiledTool{key: key, tool: tool})
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].tool.ID < result[j].tool.ID })
 	return result, ids
 }
 
@@ -558,7 +573,11 @@ func compileParameters(accumulator *toolAccumulator, warnings *[]pendingWarning)
 		if values[i].hasOrder && values[i].order != values[j].order {
 			return values[i].order < values[j].order
 		}
-		return canonicalText(values[i].name) < canonicalText(values[j].name)
+		left, right := canonicalText(values[i].name), canonicalText(values[j].name)
+		if left != right {
+			return left < right
+		}
+		return values[i].name < values[j].name
 	})
 	result := make([]tir.Parameter, 0, len(values))
 	for _, parameter := range values {
@@ -586,7 +605,13 @@ func locatorIDs(accumulator *toolAccumulator, toolID string) map[string]string {
 }
 
 func compileLocators(accumulator *toolAccumulator, ids map[string]string) []tir.LocatorCandidate {
+	// Family members stay in document order so the first "Next" is "Next",
+	// not "Next (2)". Ranked fallbacks for one element still prefer higher
+	// confidence.
 	keys := sortedMapKeys(accumulator.locators)
+	if accumulator.family && len(accumulator.locatorOrder) > 0 {
+		keys = accumulator.locatorOrder
+	}
 	type ranked struct {
 		key   string
 		value tir.LocatorCandidate
@@ -594,6 +619,9 @@ func compileLocators(accumulator *toolAccumulator, ids map[string]string) []tir.
 	values := make([]ranked, 0, len(keys))
 	for _, key := range keys {
 		item := accumulator.locators[key]
+		if item == nil {
+			continue
+		}
 		score, provenance := aggregateEvidence(item.evidence)
 		item.locator.Confidence = tir.Confidence{
 			Score: score, Rationale: confidenceRationale(len(item.evidence)),
@@ -604,12 +632,14 @@ func compileLocators(accumulator *toolAccumulator, ids map[string]string) []tir.
 	for i := range values {
 		values[i].value.ID = ids[values[i].key]
 	}
-	sort.Slice(values, func(i, j int) bool {
-		if values[i].value.Confidence.Score != values[j].value.Confidence.Score {
-			return values[i].value.Confidence.Score > values[j].value.Confidence.Score
-		}
-		return values[i].key < values[j].key
-	})
+	if !accumulator.family {
+		sort.Slice(values, func(i, j int) bool {
+			if values[i].value.Confidence.Score != values[j].value.Confidence.Score {
+				return values[i].value.Confidence.Score > values[j].value.Confidence.Score
+			}
+			return values[i].key < values[j].key
+		})
+	}
 	result := make([]tir.LocatorCandidate, len(values))
 	for i := range values {
 		result[i] = values[i].value
@@ -622,7 +652,7 @@ func compileActions(accumulator *toolAccumulator, ids map[string]string, locator
 	for index, locator := range locators {
 		locatorRank[locator.ID] = index
 	}
-	keys := sortedMapKeys(accumulator.actions)
+	keys := accumulator.actionOrder
 	result := make([]tir.ActionBinding, 0, len(keys))
 	for _, key := range keys {
 		item := accumulator.actions[key]
@@ -639,6 +669,13 @@ func compileActions(accumulator *toolAccumulator, ids map[string]string, locator
 			item.action.SideEffect.Class != tir.SideEffectSubmission &&
 			item.action.SideEffect.Class != tir.SideEffectUnknown
 		item.action.SideEffect.Rationale = chooseDescription(item.rationales)
+		if len(item.action.LocatorCandidateIDs) > 0 {
+			if accumulator.family {
+				item.action.LocatorSelection = tir.LocatorSelectionByTargetName
+			} else {
+				item.action.LocatorSelection = tir.LocatorSelectionRanked
+			}
+		}
 		if len(item.classes) > 1 {
 			*warnings = append(*warnings, pendingWarning{
 				code:    "ambiguous_side_effect",
@@ -648,9 +685,7 @@ func compileActions(accumulator *toolAccumulator, ids map[string]string, locator
 		}
 		result = append(result, item.action)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return actionOutputKey(result[i]) < actionOutputKey(result[j])
-	})
+	// Document order: actions stay in the order they were first observed.
 	return result
 }
 
@@ -659,6 +694,8 @@ func compileCoverage(document *tir.Document, reported bool, frames map[string]*f
 		document.FrameCoverage.Status = tir.CoverageUnavailable
 		return
 	}
+	// Frame coverage is a set. Emit covered and uncovered frames in lexicographic
+	// path-key order once, here at the producer.
 	keys := sortedMapKeys(frames)
 	for _, key := range keys {
 		frame := frames[key]
@@ -703,6 +740,9 @@ func compileCoverage(document *tir.Document, reported bool, frames map[string]*f
 	}
 }
 
+// compileWarnings emits the warning set in lexicographic code, tool, frame
+// path, and message order. That is the only warning sort; tir.Canonical does
+// not sort again.
 func compileWarnings(source []pendingWarning, toolIDs map[string]string) []tir.Warning {
 	unique := make(map[string]tir.Warning)
 	for _, warning := range source {
@@ -730,7 +770,7 @@ func compileParameter(field string, source observation.Parameter) (tir.Parameter
 		return tir.Parameter{}, err
 	}
 	return tir.Parameter{
-		Name: cleanText(source.Name), Description: cleanText(source.Description),
+		Name: cleanText(source.Name), Description: cleanDescription(source.Description),
 		Type: shape.Type, Required: source.Required,
 		Enum: shape.Enum, Items: shape.Items, Properties: shape.Properties,
 	}, nil
@@ -741,7 +781,7 @@ func compileShape(field string, source observation.ParameterShape) (tir.Paramete
 		return tir.ParameterShape{}, err
 	}
 	result := tir.ParameterShape{
-		Type: tir.ValueType(source.Type), Enum: sortedUniqueStrings(cleanStrings(source.Enum)),
+		Type: tir.ValueType(source.Type), Enum: uniqueInOrder(cleanStrings(source.Enum)),
 	}
 	if source.Items != nil {
 		items, err := compileShape(field+".items", *source.Items)
@@ -771,7 +811,7 @@ func compileProperties(field string, source []observation.ParameterProperty) ([]
 			return nil, err
 		}
 		item := ordered{value: tir.ParameterProperty{
-			Name: cleanText(property.Name), Description: cleanText(property.Description),
+			Name: cleanText(property.Name), Description: cleanDescription(property.Description),
 			Required: property.Required, Shape: shape,
 		}}
 		if property.SourceOrder != nil {
@@ -786,7 +826,11 @@ func compileProperties(field string, source []observation.ParameterProperty) ([]
 		if values[i].hasOrder && values[i].order != values[j].order {
 			return values[i].order < values[j].order
 		}
-		return canonicalText(values[i].value.Name) < canonicalText(values[j].value.Name)
+		left, right := canonicalText(values[i].value.Name), canonicalText(values[j].value.Name)
+		if left != right {
+			return left < right
+		}
+		return values[i].value.Name < values[j].value.Name
 	})
 	result := make([]tir.ParameterProperty, len(values))
 	for i := range values {
@@ -883,7 +927,7 @@ func compileSemanticNodes[T any](
 
 func rejectNegativeNth(field string, nth int) error {
 	if nth < 0 {
-		return &Error{Field: field, Code: "invalid_nth", Message: "must be nonnegative"}
+		return &Error{Field: field, Code: CodeInvalidNth, Message: "must be nonnegative"}
 	}
 	return nil
 }
@@ -893,6 +937,8 @@ func identityName(name string) string {
 }
 
 func aggregateEvidence(evidence map[string]observation.Evidence) (float64, []tir.Provenance) {
+	// Provenance is a set. Emit kind+reference in lexicographic order once,
+	// here at the producer. tir.Canonical dedupes without sorting again.
 	keys := sortedMapKeys(evidence)
 	product := 1.0
 	provenance := make([]tir.Provenance, 0, len(keys))
@@ -922,7 +968,7 @@ func validateEvidence(field string, evidence observation.Evidence) error {
 	}
 	if math.IsNaN(evidence.Score) || math.IsInf(evidence.Score, 0) ||
 		evidence.Score < 0 || evidence.Score > 1 {
-		return &Error{Field: field + ".score", Code: "invalid_confidence", Message: "must be a finite number in [0, 1]"}
+		return &Error{Field: field + ".score", Code: CodeInvalidConfidence, Message: "must be a finite number in [0, 1]"}
 	}
 	return nil
 }
@@ -932,7 +978,7 @@ func validateSourceKind(field string, kind observation.SourceKind) error {
 	case observation.SourceLaunchURL, observation.SourceCDPAttach:
 		return nil
 	default:
-		return &Error{Field: field, Code: "invalid_source_kind", Message: "must be launch_url or cdp_attach"}
+		return &Error{Field: field, Code: CodeInvalidSourceKind, Message: "must be launch_url or cdp_attach"}
 	}
 }
 
@@ -942,7 +988,7 @@ func validateValueType(field string, value observation.ValueType) error {
 		observation.ValueBoolean, observation.ValueObject, observation.ValueArray:
 		return nil
 	default:
-		return &Error{Field: field, Code: "invalid_value_type", Message: "must be string, number, integer, boolean, object, or array"}
+		return &Error{Field: field, Code: CodeInvalidValueType, Message: "must be string, number, integer, boolean, object, or array"}
 	}
 }
 
@@ -951,7 +997,7 @@ func validateActionKind(field string, kind observation.ActionKind) error {
 	case observation.ActionClick, observation.ActionFill, observation.ActionSelect, observation.ActionCheck:
 		return nil
 	default:
-		return &Error{Field: field, Code: "invalid_action_kind", Message: "must be click, fill, select, or check"}
+		return &Error{Field: field, Code: CodeInvalidActionKind, Message: "must be click, fill, select, or check"}
 	}
 }
 
@@ -960,14 +1006,14 @@ func validateSideEffect(field string, sideEffect observation.SideEffect) error {
 	case observation.SideEffectNone, observation.SideEffectLocalState, observation.SideEffectNetwork,
 		observation.SideEffectNavigation, observation.SideEffectSubmission, observation.SideEffectUnknown:
 	default:
-		return &Error{Field: field + ".class", Code: "invalid_side_effect", Message: "contains an unsupported value"}
+		return &Error{Field: field + ".class", Code: CodeInvalidSideEffect, Message: "contains an unsupported value"}
 	}
 	if sideEffect.SafeForExploration &&
 		(sideEffect.Class == observation.SideEffectNavigation ||
 			sideEffect.Class == observation.SideEffectSubmission ||
 			sideEffect.Class == observation.SideEffectUnknown) {
 		return &Error{
-			Field: field, Code: "unsafe_exploration",
+			Field: field, Code: CodeUnsafeExploration,
 			Message: "navigation, submission, and unknown cannot be safe for exploration",
 		}
 	}
@@ -980,7 +1026,7 @@ func validateEvidenceKind(field string, kind observation.EvidenceKind) error {
 		observation.EvidencePageMetadata, observation.EvidenceHeuristic:
 		return nil
 	default:
-		return &Error{Field: field, Code: "invalid_provenance_kind", Message: "must be dom, accessibility, page_metadata, or heuristic"}
+		return &Error{Field: field, Code: CodeInvalidProvenanceKind, Message: "must be dom, accessibility, page_metadata, or heuristic"}
 	}
 }
 
@@ -1043,24 +1089,33 @@ func actionIdentity(action tir.ActionBinding, locatorKeys []string) string {
 	return joinedKey(string(action.Action), action.InputParameter, strings.Join(locatorKeys, "\x1e"))
 }
 
-func actionOutputKey(action tir.ActionBinding) string {
-	return joinedKey(string(action.Action), action.InputParameter,
-		strings.Join(action.LocatorCandidateIDs, "\x1e"), string(action.SideEffect.Class))
-}
-
 func locatorIdentityKey(field string, locator tir.LocatorCandidate) (string, error) {
+	// CSS is a non-identity fallback. Path-node CSSFallback is zeroed before
+	// the key is hashed so a finder selector change cannot move the tool ID.
 	return marshalIdentity(field, struct {
 		FramePath  []tir.PathNode
 		ShadowPath []tir.PathNode
 		Semantic   *tir.SemanticLocator
-	}{locator.FramePath, locator.ShadowPath, locator.Semantic})
+	}{identityPath(locator.FramePath), identityPath(locator.ShadowPath), locator.Semantic})
+}
+
+func identityPath(nodes []tir.PathNode) []tir.PathNode {
+	if len(nodes) == 0 {
+		return nodes
+	}
+	result := make([]tir.PathNode, len(nodes))
+	for i, node := range nodes {
+		result[i] = node
+		result[i].CSSFallback = ""
+	}
+	return result
 }
 
 func marshalIdentity(field string, value any) (string, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return "", &Error{
-			Field: field, Code: "marshal_failed",
+			Field: field, Code: CodeMarshalFailed,
 			Message: "could not build a deterministic identity key",
 			err:     err,
 		}
@@ -1087,9 +1142,13 @@ func semanticNodesKey(nodes []observation.SemanticNode) string {
 }
 
 func observationFramePathKey(path []observation.FrameReference) string {
-	return joinedFramePathKey(path, func(frame observation.FrameReference) (int, string, string) {
-		return frame.Index, frame.Name, frame.Src
-	})
+	// Identity uses frame index plus origin/path. The frame name is diagnostic
+	// and must not enter the key; src is already bounded by pageurl.PageURL.
+	parts := make([]string, 0, len(path)*2)
+	for _, frame := range path {
+		parts = append(parts, strconv.Itoa(frame.Index), pageurl.PageURL(frame.Src))
+	}
+	return joinedKey(parts...)
 }
 
 func tirFramePathKey(path []tir.FrameReference) string {
@@ -1241,8 +1300,26 @@ func cleanStrings(values []string) []string {
 	return result
 }
 
+const (
+	textLimit        = 256
+	descriptionLimit = 512
+)
+
 func cleanText(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+	return limitText(value, textLimit)
+}
+
+func cleanDescription(value string) string {
+	return limitText(value, descriptionLimit)
+}
+
+func limitText(value string, limit int) string {
+	collapsed := strings.Join(strings.Fields(value), " ")
+	runes := []rune(collapsed)
+	if len(runes) <= limit {
+		return collapsed
+	}
+	return string(runes[:limit])
 }
 
 func canonicalText(value string) string {
@@ -1263,8 +1340,27 @@ func firstOrEmpty(values []string) string {
 	return values[0]
 }
 
+// uniqueInOrder returns a copy of values with duplicates removed, keeping the
+// first occurrence. Enum values use this so source order survives.
+func uniqueInOrder(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 // sortedUniqueStrings returns a sorted copy of values with duplicates removed.
-// It does not mutate the argument.
+// It does not mutate the argument. Set-like strings (frame reasons, URLs)
+// use it; enum values do not.
 func sortedUniqueStrings(values []string) []string {
 	if len(values) == 0 {
 		return values

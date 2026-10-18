@@ -3,19 +3,35 @@ package browser
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-rod/rod/lib/launcher/flags"
 	"github.com/go-rod/rod/lib/proto"
 )
 
 func TestOwnedLauncherDisablesLeaklessAndPreservesIsolation(t *testing.T) {
 	t.Parallel()
-	instance := newOwnedLauncher(context.Background(), "chromium", t.TempDir(), true, "")
-	if instance.Has(flags.Leakless) {
-		t.Fatal("owned launcher must explicitly disable leakless")
+	profile := t.TempDir()
+	instance := newOwnedLauncher(context.Background(), "chromium", profile, true, "")
+	if instance.Has("leakless") {
+		t.Fatal("owned launcher must not set a leakless flag")
+	}
+	command := instance.command()
+	if command.Path != "chromium" && !strings.HasSuffix(strings.ToLower(command.Path), "chromium") &&
+		!strings.Contains(strings.ToLower(command.Path), "chromium") {
+		t.Fatalf("command path = %q, want the chosen Chromium executable", command.Path)
+	}
+	for _, arg := range command.Args[1:] {
+		name := strings.TrimLeft(arg, "-")
+		name, _, _ = strings.Cut(name, "=")
+		if strings.EqualFold(name, "leakless") {
+			t.Fatalf("command line sets a leakless flag: %s", strings.Join(command.Args, " "))
+		}
+	}
+	if strings.EqualFold(filepath.Base(command.Path), "leakless") || strings.EqualFold(filepath.Base(command.Args[0]), "leakless") {
+		t.Fatalf("command starts leakless: %s", strings.Join(command.Args, " "))
 	}
 	if !instance.Has("site-per-process") {
 		t.Fatal("owned launcher must preserve site-per-process isolation")
@@ -26,6 +42,10 @@ func TestOwnedLauncherDisablesLeaklessAndPreservesIsolation(t *testing.T) {
 	}
 	if instance.Has("disable-site-isolation-trials") {
 		t.Fatal("owned launcher must not disable site isolation trials")
+	}
+	dir, ok := instance.GetFlags("user-data-dir")
+	if !ok || len(dir) != 1 || dir[0] != profile {
+		t.Fatalf("user-data-dir = %v, want isolated profile %s", dir, profile)
 	}
 }
 

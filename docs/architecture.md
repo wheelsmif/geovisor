@@ -49,7 +49,9 @@ unsafe-exploration constraints: type-consistent parameter shapes, tool IDs that
 match `^[A-Za-z0-9_-]{1,64}$`, explicit partial frame coverage, and the
 prohibition on safe exploration of navigation, submission, or unknown.
 Length-prefixed `framePathKey` uniqueness is enforced by Go `tir.Validate` and
-`canonical` only; the JSON Schema does not implement those keys. A document
-that passes validation emits on every registered format.
+`canonical` only; the JSON Schema does not implement those keys. That
+uniqueness key includes the frame name. Tool identity does not: it uses the
+frame index plus `pageurl.PageURL` of the frame source. A document that
+passes validation emits on every registered format.
 
 See `docs/adr` for the decisions that establish these boundaries.

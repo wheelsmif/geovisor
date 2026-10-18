@@ -107,6 +107,10 @@ export interface Interaction {
   role: string;
   name: string;
   description?: string;
+  /** HTML input type. Reserved submit/reset/image actions use this, not CSS. */
+  inputType?: string;
+  /** Same-document citation or fragment href. Low-value detection uses this flag. */
+  citationHref?: boolean;
   parameters: Parameter[];
   locators: Locator[];
   actions: Action[];

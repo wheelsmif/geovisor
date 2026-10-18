@@ -51,7 +51,6 @@ func TestPayloadCompilerEmitterPipeline(t *testing.T) {
 	baseline := compileAndEmit(t, root, input)
 
 	reversed := cloneInput(t, input)
-	reverse(reversed.Batches[0].Interactions)
 	for index := range reversed.Batches[0].Interactions {
 		reverse(reversed.Batches[0].Interactions[index].Evidence)
 	}
@@ -120,7 +119,7 @@ func compileAndEmit(t *testing.T, root string, input compiler.Input) map[emitter
 		case emitter.FormatTIRJSON:
 			validateSchema(t, root, "tir.schema.json", result.Primary.Data)
 		case emitter.FormatMCP:
-			validateSchema(t, root, "mcp-tools-list-2026-07-28.schema.json", result.Primary.Data)
+			validateSchema(t, root, "mcp-tools-list-"+emitter.MCPSpecVersion+".schema.json", result.Primary.Data)
 		case emitter.FormatOpenAI:
 			validateSchema(t, root, "openai-function-tools.schema.json", result.Primary.Data)
 		}
@@ -139,7 +138,7 @@ func validateSchema(t *testing.T, root, schemaName string, payload []byte) {
 	compiler := jsonschema.NewCompiler()
 	for _, name := range []string{
 		"tir.schema.json",
-		"mcp-tools-list-2026-07-28.schema.json",
+		"mcp-tools-list-" + emitter.MCPSpecVersion + ".schema.json",
 		"openai-function-tools.schema.json",
 		"emitter-bindings.schema.json",
 	} {
@@ -175,6 +174,9 @@ func extractFixture(t *testing.T, root string) observation.Batch {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
+		if os.Getenv("GEOVISOR_REQUIRE_NODE") == "1" {
+			t.Fatal("GEOVISOR_REQUIRE_NODE=1 but Node.js was not found")
+		}
 		t.Skip("Node.js is required for payload pipeline integration")
 	}
 	command := exec.Command(node, "client/test/extract-fixture.mjs", fixturePath)

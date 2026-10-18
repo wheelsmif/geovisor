@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -60,7 +60,12 @@ export async function loadEsbuildModule(entryPoint, prefix) {
   if (!output) {
     throw new Error(`esbuild did not produce a bundle for ${entryPoint}`);
   }
-  const file = join(await mkdtemp(join(tmpdir(), prefix)), "module.mjs");
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  const file = join(directory, "module.mjs");
   await writeFile(file, output.text);
-  return import(pathToFileURL(file).href);
+  try {
+    return await import(pathToFileURL(file).href);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }

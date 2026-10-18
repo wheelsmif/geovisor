@@ -85,7 +85,7 @@ func deriveMCPAnnotations(actions []tir.ActionBinding) mcpAnnotations {
 	hints := annotationHintsFrom(actions)
 	return mcpAnnotations{
 		ReadOnlyHint:    hints.readOnly,
-		DestructiveHint: !hints.readOnly,
+		DestructiveHint: hints.destructive,
 		IdempotentHint:  hints.readOnly,
 		OpenWorldHint:   hints.openWorld,
 	}

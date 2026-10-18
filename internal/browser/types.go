@@ -1,5 +1,5 @@
 // Package browser observes Chromium pages and returns browser-independent
-// compiler input. It owns browser processes only in launch mode.
+// observation input. It owns browser processes only in launch mode.
 package browser
 
 import (
@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/wheelsmif/geovisor/internal/compiler"
 	"github.com/wheelsmif/geovisor/internal/observation"
 )
 
@@ -18,6 +17,15 @@ const (
 	DefaultSelectorAllowance = 2 * time.Second
 	DefaultFrameOverhead     = 2 * time.Second
 	DefaultExplorationBudget = time.Second
+	// DefaultBrowserControlTimeout bounds Browser.close, target attach, and
+	// target detach. It is not a DOM-quiet deadline.
+	DefaultBrowserControlTimeout = 2 * time.Second
+	// MaxInteractionsPerFrame matches the extractor cap. Crossing it is partial
+	// coverage, not a silent drop.
+	MaxInteractionsPerFrame = 2000
+	// MaxObservationPayloadBytes bounds a Runtime.evaluate result before it is
+	// unmarshaled. Corpus pages are far smaller.
+	MaxObservationPayloadBytes = 4 << 20
 )
 
 // BrowserSource is the small boundary shared by launch and attach sources.
@@ -25,10 +33,10 @@ type BrowserSource interface {
 	Observe(context.Context) (Result, error)
 }
 
-// Result includes compiler input and non-fatal, typed diagnostics. A result
+// Result includes observation input and non-fatal, typed diagnostics. A result
 // may contain useful partial observations when diagnostics are present.
 type Result struct {
-	Input       compiler.Input
+	Input       observation.Input
 	Diagnostics []Diagnostic
 }
 
@@ -94,9 +102,9 @@ func (e *Error) Unwrap() error {
 // ExtractionOptions are passed to the committed browser payload.
 type ExtractionOptions struct {
 	SafeExplore   bool `json:"safeExplore"`
-	MaxDepth      int  `json:"maxDepth,omitempty"`
-	MaxOperations int  `json:"maxOperations,omitempty"`
-	TimeoutMS     int  `json:"timeoutMs,omitempty"`
+	MaxDepth      int  `json:"maxDepth"`
+	MaxOperations int  `json:"maxOperations"`
+	TimeoutMS     int  `json:"timeoutMs"`
 }
 
 // LaunchOptions configure an isolated Chromium process. Headless defaults to

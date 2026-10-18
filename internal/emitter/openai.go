@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/wheelsmif/geovisor/internal/tir"
 )
@@ -53,10 +54,14 @@ func (OpenAI) Emit(
 		if err != nil {
 			return Result{}, err
 		}
+		description := tool.Description
+		if strings.TrimSpace(description) == "" {
+			description = tool.Name
+		}
 		tools = append(tools, openAIFunctionTool{
 			Type:        "function",
 			Name:        tool.ID,
-			Description: tool.Description,
+			Description: description,
 			Parameters:  inputSchema,
 			Strict:      options.Strict,
 		})

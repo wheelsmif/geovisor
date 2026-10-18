@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -54,8 +55,10 @@ func applyAndValidateTimings(
 	return validateFrameTimeout(*frameTimeout, explorationMS)
 }
 
+var errFrameTimeout = errors.New("frame timeout")
+
 func wrapTimingConfiguration(prefix string, err error) error {
-	if strings.HasPrefix(err.Error(), "frame timeout") {
+	if errors.Is(err, errFrameTimeout) {
 		return configurationError(prefix+".frame_timeout", err)
 	}
 	return configurationError(prefix+".timing", err)
@@ -108,10 +111,10 @@ func explorationBudget(timeoutMS int) time.Duration {
 
 func validateFrameTimeout(frameTimeout time.Duration, explorationMS int) error {
 	if frameTimeout <= 0 {
-		return errors.New("frame timeout must be positive")
+		return fmt.Errorf("%w must be positive", errFrameTimeout)
 	}
 	if frameTimeout < explorationBudget(explorationMS) {
-		return errors.New("frame timeout must be at least the exploration timeout")
+		return fmt.Errorf("%w must be at least the exploration timeout", errFrameTimeout)
 	}
 	return nil
 }
@@ -218,15 +221,28 @@ func sanitizeText(value string, secrets ...string) string {
 				}
 				value = strings.ReplaceAll(value, parsed.User.String(), "[redacted]")
 			}
+			var secrets []string
 			for _, values := range parsed.Query() {
 				for _, item := range values {
 					// Single-character and two-character values are not secrets
 					// worth scanning for; replacing them shreds ordinary
 					// diagnostics.
 					if len(item) >= 3 {
-						value = strings.ReplaceAll(value, item, "[redacted]")
+						secrets = append(secrets, item)
 					}
 				}
+			}
+			// Longest first so a shorter query value that is a prefix of a
+			// longer one cannot split the longer secret. url.Values iteration
+			// order is not stable.
+			sort.Slice(secrets, func(i, j int) bool {
+				if len(secrets[i]) != len(secrets[j]) {
+					return len(secrets[i]) > len(secrets[j])
+				}
+				return secrets[i] < secrets[j]
+			})
+			for _, item := range secrets {
+				value = strings.ReplaceAll(value, item, "[redacted]")
 			}
 		}
 	}

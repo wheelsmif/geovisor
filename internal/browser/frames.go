@@ -11,9 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
-	"github.com/wheelsmif/geovisor/internal/compiler"
 	"github.com/wheelsmif/geovisor/internal/observation"
 	"github.com/wheelsmif/geovisor/internal/pageurl"
 	"github.com/wheelsmif/geovisor/internal/payload"
@@ -48,7 +46,7 @@ type discoveredFrame struct {
 
 func observeTarget(
 	ctx context.Context,
-	browser *rod.Browser,
+	browser *cdpBrowser,
 	rootSession *sessionClient,
 	targetID proto.TargetTargetID,
 	options observeTargetOptions,
@@ -111,13 +109,19 @@ func observeTarget(
 	}
 
 	for _, frame := range frames {
+		if err := ctx.Err(); err != nil {
+			return result, operationError(ctx, ErrorTimeout, "frames.extract", "extract frames", err)
+		}
 		fact := observation.Frame{
 			Path:       cloneFramePath(frame.path),
 			Accessible: true,
 			URL:        pageurl.PageURL(frame.frame.URL),
-			Origin:     frame.frame.SecurityOrigin,
+			Origin:     pageurl.NormalizeSecurityOrigin(frame.frame.SecurityOrigin, frame.frame.URL),
 		}
 		extracted, code, reason := extractFrame(frame, options.extraction, options.frameTimeout)
+		if err := ctx.Err(); err != nil {
+			return result, operationError(ctx, ErrorTimeout, "frames.extract", "extract frames", err)
+		}
 		if reason != "" {
 			fact.Accessible = false
 			fact.Reason = reason
@@ -129,10 +133,21 @@ func observeTarget(
 			augmentBatch(&extracted, frame.path)
 			batch.Interactions = append(batch.Interactions, extracted.Interactions...)
 			batch.Warnings = append(batch.Warnings, extracted.Warnings...)
+			if interactionLimitHit(extracted) {
+				fact.Accessible = false
+				fact.Reason = "interaction limit reached before every control was recorded"
+				result.Diagnostics = append(result.Diagnostics, Diagnostic{
+					Code: DiagnosticFrameUncovered, Severity: SeverityWarning, Message: fact.Reason,
+					FramePath: cloneFramePath(frame.path),
+				})
+			}
 		}
 		batch.Frames = append(batch.Frames, fact)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return result, operationError(ctx, ErrorTimeout, "frames.extract", "extract frames", err)
+	}
 	if len(frames) > 0 && accessInterstitial(frames[0]) {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Code: DiagnosticAccessInterstitial, Severity: SeverityWarning,
@@ -141,8 +156,9 @@ func observeTarget(
 		})
 	}
 
+	appendDiagnosticWarnings(&batch, result.Diagnostics)
 	finalURL := tree.FrameTree.Frame.URL
-	result.Input = compiler.Input{
+	result.Input = observation.Input{
 		Source: observation.Source{
 			Kind: options.sourceKind, RequestedURL: options.requestedURL,
 			FinalURL: finalURL, StealthEnabled: options.stealthEnabled,
@@ -150,6 +166,40 @@ func observeTarget(
 		Batches: []observation.Batch{batch},
 	}
 	return result, nil
+}
+
+// appendDiagnosticWarnings copies the diagnostics that previously existed only
+// on stderr into the observation batch so the compiler can emit them as TIR
+// warnings. Frame-uncovered diagnostics that already become uncovered frames
+// are not copied, except the target-list failure that discovers no frames.
+func appendDiagnosticWarnings(batch *observation.Batch, diagnostics []Diagnostic) {
+	for _, diagnostic := range diagnostics {
+		switch diagnostic.Code {
+		case DiagnosticDOMNotQuiet, DiagnosticAccessInterstitial:
+			batch.Warnings = append(batch.Warnings, observation.Warning{
+				Code:      string(diagnostic.Code),
+				Message:   diagnostic.Message,
+				FramePath: cloneFramePath(diagnostic.FramePath),
+			})
+		case DiagnosticFrameUncovered:
+			if strings.HasPrefix(diagnostic.Message, "browser could not list targets") {
+				batch.Warnings = append(batch.Warnings, observation.Warning{
+					Code:      string(diagnostic.Code),
+					Message:   diagnostic.Message,
+					FramePath: cloneFramePath(diagnostic.FramePath),
+				})
+			}
+		}
+	}
+}
+
+func interactionLimitHit(batch observation.Batch) bool {
+	for _, warning := range batch.Warnings {
+		if warning.Code == "interaction_limit" {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForMissingOOPIFs(
@@ -338,7 +388,7 @@ func waitForDOMQuiet(
 
 func attachOOPIFSessions(
 	ctx context.Context,
-	browser *rod.Browser,
+	browser *cdpBrowser,
 	rootTargetID proto.TargetTargetID,
 	rootSession *sessionClient,
 	rootTree *proto.PageFrameTree,
@@ -363,12 +413,14 @@ func attachOOPIFSessions(
 			return targets.TargetInfos, nil
 		},
 		func(target *proto.TargetTargetInfo) (*sessionClient, *proto.PageFrameTree, error) {
-			attachContext, cancel := context.WithTimeout(ctx, DefaultDOMQuietLimit)
+			attachContext, cancel := context.WithTimeout(ctx, DefaultBrowserControlTimeout)
 			defer cancel()
 			session, attachErr := attachTarget(attachContext, browser, target.TargetID)
 			if attachErr != nil {
 				return nil, nil, attachErr
 			}
+			// Page.enable is best-effort here. The following Page.getFrameTree call is
+			// checked, and a failure marks the out-of-process frame uncovered.
 			_ = (proto.PageEnable{}).Call(session)
 			tree, treeErr := (proto.PageGetFrameTree{}).Call(session)
 			session.ctx = ctx
@@ -603,12 +655,12 @@ func flattenCompleteFrameTree(
 	}
 	addTree(root)
 	oopifIDs := make([]proto.PageFrameID, 0, len(oopifTrees))
-	for frameID, tree := range oopifTrees {
+	for frameID := range oopifTrees {
 		oopifIDs = append(oopifIDs, frameID)
-		addTree(tree)
 	}
 	sort.Slice(oopifIDs, func(i, j int) bool { return oopifIDs[i] < oopifIDs[j] })
 	for _, frameID := range oopifIDs {
+		addTree(oopifTrees[frameID])
 		frame := frames[frameID]
 		if frame != nil && frame.ParentID != "" {
 			fallbackChildren[frame.ParentID] = append(fallbackChildren[frame.ParentID], frameID)
@@ -966,6 +1018,9 @@ func isExtractionTimeout(ctx context.Context, err error) bool {
 }
 
 func decodeBatchStrict(data []byte) (observation.Batch, error) {
+	if len(data) > MaxObservationPayloadBytes {
+		return observation.Batch{}, fmt.Errorf("observation JSON exceeds %d bytes", MaxObservationPayloadBytes)
+	}
 	var batch observation.Batch
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -1022,6 +1077,8 @@ func piercedDocument(session *sessionClient) *proto.DOMNode {
 	// Newer Chromium builds return a root with no children unless the DOM
 	// domain is enabled first. Without that snapshot, every CDP child was
 	// treated as closed-shadow and skipped.
+	// DOM.enable is best-effort. A failure still falls through to DOM.getDocument,
+	// whose error (or an incomplete pierce) is what marks the frame uncovered.
 	_ = (proto.DOMEnable{}).Call(session)
 	depth := -1
 	document, err := (proto.DOMGetDocument{Depth: &depth, Pierce: true}).Call(session)

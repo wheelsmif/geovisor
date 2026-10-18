@@ -30,6 +30,16 @@ var roundTripInputs = []string{
 	roundTripDriver,
 	"internal/payload/extractor.js",
 	"client/src/apply-runtime.ts",
+	"client/test/helpers.mjs",
+	"internal/compiler/lowvalue_patterns.json",
+	"client/src/shared/dom.ts",
+	"client/src/shared/limits.ts",
+	"client/src/shared/locate.ts",
+	"client/src/shared/low-value.ts",
+	"client/src/shared/name.ts",
+	"client/src/shared/option.ts",
+	"client/src/shared/role.ts",
+	"client/src/shared/text.ts",
 }
 
 // Tool IDs are a slug plus a twelve-character content digest. Tests address

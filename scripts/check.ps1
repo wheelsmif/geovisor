@@ -14,6 +14,9 @@ function Invoke-Step {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
+$oldToolchain = $env:GOTOOLCHAIN
+$oldRequireBrowser = $env:GEOVISOR_REQUIRE_BROWSER
+$oldRequireNode = $env:GEOVISOR_REQUIRE_NODE
 Push-Location $root
 try {
     $env:GOTOOLCHAIN = "go$((Get-Content .go-version -Raw).Trim())"
@@ -23,18 +26,22 @@ try {
     Invoke-Step { npm run check }
     # npm succeeded, so Node is present. Fail the apply harness instead of skipping.
     $env:GEOVISOR_REQUIRE_NODE = "1"
-    $unformatted = gofmt -l .
+    $unformatted = @(gofmt -l .)
+    if ($LASTEXITCODE -ne 0) { throw "gofmt failed ($LASTEXITCODE)" }
     if ($unformatted) { throw "gofmt required:`n$($unformatted -join "`n")" }
     Invoke-Step { go vet ./... }
-    Invoke-Step { go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./... }
+    Invoke-Step { go tool "-modfile=tools/go.mod" staticcheck ./... }
     Invoke-Step { go test ./... }
     Invoke-Step { ./scripts/verify-release.ps1 }
 
     if ($Security) {
         Invoke-Step { npm audit --audit-level=high }
-        Invoke-Step { go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./... }
+        Invoke-Step { go tool "-modfile=tools/go.mod" govulncheck ./... }
     }
 }
 finally {
     Pop-Location
+    $env:GOTOOLCHAIN = $oldToolchain
+    $env:GEOVISOR_REQUIRE_BROWSER = $oldRequireBrowser
+    $env:GEOVISOR_REQUIRE_NODE = $oldRequireNode
 }

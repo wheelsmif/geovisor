@@ -7,14 +7,12 @@ one exists. There is no numbered release today.
 
 ## Reporting a vulnerability
 
-Prefer the repository host's private vulnerability-reporting or security
-advisory feature when it is available. Do not publish secrets, exploit details,
-private URLs, captured page data, or credentials in a public issue.
-
-If no private reporting feature is available, open a
-[minimal repository issue](https://github.com/wheelsmif/geovisor/issues) that
-asks maintainers for a private reporting channel. Include no sensitive
-technical details in that issue. The project does not currently publish a
+Report vulnerabilities at
+[GitHub's private advisory form](https://github.com/wheelsmif/geovisor/security/advisories/new).
+A report there works once the maintainer has enabled GitHub private
+vulnerability reporting. Do not publish secrets, exploit details, private URLs,
+captured page data,
+or credentials in a public issue. The project does not currently publish a
 separate security contact URL or response-time guarantee.
 
 Useful private reports include the affected version, operating system, browser
@@ -28,9 +26,11 @@ It does not host an MCP daemon or call an LLM service. Treat inspected pages and
 generated artifacts as untrusted input and potentially sensitive output.
 
 Safe exploration must never submit, navigate, or issue network requests.
-Bindings classified `unknown` cannot be asserted as safe to explore. When
-safe exploration is enabled it restores any `<details>` `open` state it
-changed. Stealth is explicit opt-in and is not an access-control bypass.
+When it is enabled it sets `<details open>` and restores each element's prior
+`open` state. It does not consult `safeForExploration`. Bindings classified
+`unknown` cannot be marked safe in the schema. `--depth 0` and
+`--max-operations 0` perform no exploration. Stealth is explicit opt-in and
+is not an access-control bypass.
 Inaccessible frames remain visible as partial coverage. Closed shadow roots
 and suppressed element-level extraction failures are reported as warnings.
 Current field values, including textarea contents used for accessible names or
@@ -42,12 +42,20 @@ Tool names, descriptions, and other labels originate in page text
 untrusted model input: a hostile page can choose that text. JSON escaping
 does not make page-derived strings safe to follow as instructions.
 
-Owned Chromium launches disable go-rod's leakless helper at runtime. The
-transitive module remains in dependency metadata because go-rod imports it.
+Launch starts Chromium with `os/exec` (`internal/browser/launch.go`) and reads
+`DevToolsActivePort`. Attach only disconnects GEO-Visor's CDP transport.
+Nothing in this module imports `rod/lib/launcher`. The `geovisor` binary's
+import graph does not include `github.com/ysmood/leakless` or
+`github.com/ysmood/fetchup`. `go.mod`'s require block does not list them.
+`go.sum` still has their checksums because `go mod why` reaches them through
+`github.com/go-rod/rod/lib/cdp`'s tests, which import
+`github.com/go-rod/rod/lib/launcher`.
 
 Run `./scripts/check.sh --security` or
-`./scripts/check.ps1 -Security` to execute `govulncheck` for reachable Go
-vulnerabilities and `npm audit` across runtime and build dependencies. High and
-critical npm advisories fail the check; lower-severity findings are reviewed
+`./scripts/check.ps1 -Security` to execute `govulncheck` and `npm audit`.
+`govulncheck` is `go tool -modfile=tools/go.mod govulncheck ./...`. The same
+`go tool -modfile=tools/go.mod` form runs `staticcheck` on every check, with
+or without `-Security`. High and critical npm advisories fail the check;
+lower-severity findings are reviewed
 with reachability and build-time exposure recorded rather than described as
 absent.

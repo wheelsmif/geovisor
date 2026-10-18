@@ -95,6 +95,7 @@ test("follow_link target clicks the named locator, not the first", async () => {
       {
         action: "click",
         inputParameter: "target",
+        locatorSelection: "by_target_name",
         locatorCandidateIds: ["home", "next"],
       },
     ],
@@ -118,6 +119,71 @@ test("follow_link target clicks the named locator, not the first", async () => {
   assert.deepEqual(clicks, ["Next"]);
   await assert.rejects(() => executeTool(definition, { target: "Missing" }), /target does not match a locator/u);
   assert.deepEqual(clicks, ["Next"]);
+});
+
+test("checkbox labeled Target stays a boolean while a family target stays a name", async () => {
+  const { executeTool } = await loadRuntime();
+  const dom = new JSDOM(
+    `<label><input type="checkbox" checked> Target</label><a href="/home">Home</a><a href="/next">Next</a>`,
+    { url: "https://example.test/" },
+  );
+  const box = dom.window.document.querySelector("input");
+  const clicks = [];
+  for (const link of dom.window.document.querySelectorAll("a")) {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      clicks.push(link.textContent);
+    });
+  }
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+
+  const checkbox = {
+    name: "target",
+    description: "Target",
+    inputSchema: {
+      type: "object",
+      properties: { target: { type: "boolean" } },
+      required: ["target"],
+    },
+    actions: [{
+      action: "check",
+      inputParameter: "target",
+      locatorSelection: "ranked",
+      locatorCandidateIds: ["box"],
+    }],
+    locators: [{
+      id: "box",
+      framePath: [],
+      shadowPath: [],
+      semantic: { role: "checkbox", name: "Target" },
+    }],
+  };
+  const family = {
+    name: "follow_link",
+    description: "Follow one of this page's links",
+    inputSchema: {
+      type: "object",
+      properties: { target: { type: "string", enum: ["Home", "Next"] } },
+      required: ["target"],
+    },
+    actions: [{
+      action: "click",
+      inputParameter: "target",
+      locatorSelection: "by_target_name",
+      locatorCandidateIds: ["home", "next"],
+    }],
+    locators: [
+      { id: "home", framePath: [], shadowPath: [], semantic: { role: "link", name: "Home" } },
+      { id: "next", framePath: [], shadowPath: [], semantic: { role: "link", name: "Next" } },
+    ],
+  };
+
+  await executeTool(checkbox, { target: false });
+  assert.equal(box.checked, false);
+  await executeTool(family, { target: "Next" });
+  assert.deepEqual(clicks, ["Next"]);
+  assert.equal(box.checked, false);
 });
 
 test("execute throws before applying when a required parameter is missing", async () => {

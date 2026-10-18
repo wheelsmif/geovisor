@@ -1,6 +1,6 @@
 ---
-description: TypeScript quality standards for future GEO-Visor client code
-globs: "client/**/*.{ts,tsx}"
+description: TypeScript quality standards for GEO-Visor client code
+globs: "client/**/*.{ts,mts,mjs}"
 alwaysApply: false
 ---
 

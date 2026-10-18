@@ -122,14 +122,18 @@ func canonicalDocument(ctx context.Context, format Format, document *tir.Documen
 
 // annotationHints are the side-effect flags used by the MCP catalog.
 type annotationHints struct {
-	readOnly  bool
-	openWorld bool
+	readOnly    bool
+	destructive bool
+	openWorld   bool
 }
 
 func annotationHintsFrom(actions []tir.ActionBinding) annotationHints {
-	hints := annotationHints{readOnly: true}
+	hints := annotationHints{readOnly: len(actions) == 0}
 	for _, action := range actions {
 		hints.readOnly = false
+		if destructiveSideEffect(action.SideEffect.Class) {
+			hints.destructive = true
+		}
 		switch action.SideEffect.Class {
 		case tir.SideEffectNetwork, tir.SideEffectNavigation,
 			tir.SideEffectSubmission, tir.SideEffectUnknown:
@@ -137,6 +141,16 @@ func annotationHintsFrom(actions []tir.ActionBinding) annotationHints {
 		}
 	}
 	return hints
+}
+
+func destructiveSideEffect(class tir.SideEffectClass) bool {
+	switch class {
+	case tir.SideEffectNavigation, tir.SideEffectSubmission,
+		tir.SideEffectNetwork, tir.SideEffectUnknown:
+		return true
+	default:
+		return false
+	}
 }
 
 func canceled(ctx context.Context, format Format) error {

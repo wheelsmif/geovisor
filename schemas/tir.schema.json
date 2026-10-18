@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "source", "frameCoverage", "tools", "warnings"],
   "properties": {
-    "schemaVersion": { "const": "1.1.0" },
+    "schemaVersion": { "const": "1.2.0" },
     "source": { "$ref": "#/$defs/sourceMetadata" },
     "frameCoverage": { "$ref": "#/$defs/frameCoverage" },
     "tools": {
@@ -101,7 +101,7 @@
           "type": "array",
           "items": { "$ref": "#/$defs/frameReference" }
         },
-        "reason": { "type": "string", "minLength": 1 }
+        "reason": { "type": "string", "minLength": 1, "pattern": "\\S" }
       }
     },
     "frameReference": {
@@ -133,7 +133,7 @@
           "maxLength": 64,
           "pattern": "^[A-Za-z0-9_-]+$"
         },
-        "name": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "description": { "type": "string" },
         "parameters": {
           "type": "array",
@@ -145,6 +145,7 @@
         },
         "actionBindings": {
           "type": "array",
+          "minItems": 1,
           "items": { "$ref": "#/$defs/actionBinding" }
         },
         "confidence": { "$ref": "#/$defs/confidence" },
@@ -159,7 +160,7 @@
       "additionalProperties": false,
       "required": ["name", "type", "required"],
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "description": { "type": "string" },
         "type": { "$ref": "#/$defs/valueType" },
         "required": { "type": "boolean" },
@@ -254,7 +255,7 @@
       "additionalProperties": false,
       "required": ["name", "required", "shape"],
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "description": { "type": "string" },
         "required": { "type": "boolean" },
         "shape": { "$ref": "#/$defs/parameterShape" }
@@ -278,7 +279,7 @@
         { "required": ["cssFallback"] }
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "framePath": {
           "type": "array",
           "items": { "$ref": "#/$defs/pathNode" }
@@ -288,7 +289,7 @@
           "items": { "$ref": "#/$defs/pathNode" }
         },
         "semantic": { "$ref": "#/$defs/semanticLocator" },
-        "cssFallback": { "type": "string", "minLength": 1 },
+        "cssFallback": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "confidence": { "$ref": "#/$defs/confidence" },
         "provenance": {
           "type": "array",
@@ -305,7 +306,7 @@
       ],
       "properties": {
         "semantic": { "$ref": "#/$defs/semanticNode" },
-        "cssFallback": { "type": "string", "minLength": 1 }
+        "cssFallback": { "type": "string", "minLength": 1, "pattern": "\\S" }
       }
     },
     "semanticLocator": {
@@ -317,7 +318,7 @@
           "type": "array",
           "items": { "$ref": "#/$defs/semanticNode" }
         },
-        "role": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "name": { "type": "string" },
         "nth": { "type": "integer", "minimum": 0 }
       }
@@ -327,7 +328,7 @@
       "additionalProperties": false,
       "required": ["role"],
       "properties": {
-        "role": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "name": { "type": "string" },
         "nth": {
           "description": "Index among the elements matching this role and name, in document order. Absent means the first, and is the only valid form when the match is unique.",
@@ -342,14 +343,24 @@
       "required": ["action", "locatorCandidateIds", "sideEffect"],
       "properties": {
         "action": { "enum": ["click", "fill", "select", "check"] },
-        "inputParameter": { "type": "string", "minLength": 1 },
+        "inputParameter": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "locatorCandidateIds": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": { "type": "string", "minLength": 1, "pattern": "\\S" }
         },
+        "locatorSelection": { "enum": ["ranked", "by_target_name"] },
         "sideEffect": { "$ref": "#/$defs/sideEffect" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "locatorCandidateIds": { "minItems": 1 } },
+            "required": ["locatorCandidateIds"]
+          },
+          "then": { "required": ["locatorSelection"] }
+        }
+      ]
     },
     "sideEffect": {
       "type": "object",
@@ -410,8 +421,8 @@
       "additionalProperties": false,
       "required": ["code", "message", "framePath"],
       "properties": {
-        "code": { "type": "string", "minLength": 1 },
-        "message": { "type": "string", "minLength": 1 },
+        "code": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "message": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "toolId": { "type": "string", "minLength": 1 },
         "framePath": {
           "type": "array",

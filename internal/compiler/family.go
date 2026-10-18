@@ -2,7 +2,7 @@ package compiler
 
 import (
 	"fmt"
-	"regexp"
+	"strings"
 
 	"github.com/wheelsmif/geovisor/internal/observation"
 	"github.com/wheelsmif/geovisor/internal/tir"
@@ -14,31 +14,23 @@ const (
 	familyEnumCap                = 64
 )
 
-// citationMarkName, doiName, bareRFCOrDOI, and citationFragment are compiled
-// from lowvalue_patterns.json at init (see lowvalue.go).
-var reservedInputType = regexp.MustCompile(`(?i)\[type\s*=\s*["']?(submit|reset|image)["']?\]`)
-
 // isLowValueAction reports citation marks, DOI/RFC tokens, same-document
-// citation fragments, and unnamed links. Unnamed buttons are kept so they can
-// still receive a fallback name.
+// citation fragments, and unnamed links. The citation fact is CitationHref,
+// not a match against locator CSS. Unnamed buttons are kept so they can still
+// receive a fallback name.
 func isLowValueAction(source observation.Interaction) bool {
 	if source.Kind != observation.InteractionAction {
 		return false
+	}
+	if source.CitationHref {
+		return true
 	}
 	name := cleanText(source.Name)
 	role := canonicalText(source.Role)
 	if role == "" {
 		role = defaultRole(source.Kind)
 	}
-	if isLowValueName(name, role) {
-		return true
-	}
-	for _, locator := range source.Locators {
-		if citationFragment.MatchString(locator.CSS) {
-			return true
-		}
-	}
-	return false
+	return isLowValueName(name, role)
 }
 
 func familyEligible(source observation.Interaction) (tir.ActionKind, tir.SideEffectClass, bool) {
@@ -64,12 +56,12 @@ func isReservedStandaloneAction(source observation.Interaction) bool {
 			return true
 		}
 	}
-	for _, locator := range source.Locators {
-		if reservedInputType.MatchString(locator.CSS) {
-			return true
-		}
+	switch strings.ToLower(cleanText(source.InputType)) {
+	case "submit", "reset", "image":
+		return true
+	default:
+		return false
 	}
-	return false
 }
 
 func familyIdentityKey(prepared preparedInteraction, action tir.ActionKind, class tir.SideEffectClass) string {
@@ -96,8 +88,22 @@ func familyDisplayName(role string, action tir.ActionKind) string {
 	return "Click"
 }
 
-func familyToolDescription() string {
-	return "target is the control's accessible name"
+func familyToolDescription(role string, action tir.ActionKind) string {
+	switch {
+	case role == "link":
+		return "Follow one of this page's links"
+	case action == tir.ActionCheck:
+		return "Toggle one of this page's controls"
+	default:
+		return "Click one of this page's controls"
+	}
+}
+
+func familyParameterDescription(names []string) string {
+	if len(names) == 0 || len(names) > familyEnumCap {
+		return "Accessible name of the control to use"
+	}
+	return "Accessible name of the control to use: " + strings.Join(names, ", ")
 }
 
 func applyFamilyIdentity(prepared *preparedInteraction, action tir.ActionKind, class tir.SideEffectClass) {
@@ -116,9 +122,10 @@ func applyFamilyIdentity(prepared *preparedInteraction, action tir.ActionKind, c
 	prepared.actions = []preparedAction{{
 		key: familyActionIdentity(action),
 		value: tir.ActionBinding{
-			Action:         action,
-			InputParameter: familyTargetParameter,
-			SideEffect:     sideEffect,
+			Action:           action,
+			InputParameter:   familyTargetParameter,
+			LocatorSelection: tir.LocatorSelectionByTargetName,
+			SideEffect:       sideEffect,
 		},
 		locatorKeys: locatorKeys,
 	}}
@@ -159,12 +166,12 @@ func familyTargetParameterSpec(locators []tir.LocatorCandidate) tir.Parameter {
 	names := familyTargetNames(locators)
 	parameter := tir.Parameter{
 		Name:        familyTargetParameter,
-		Description: familyToolDescription(),
+		Description: familyParameterDescription(names),
 		Type:        tir.ValueString,
 		Required:    true,
 	}
 	if len(names) <= familyEnumCap {
-		parameter.Enum = sortedUniqueStrings(names)
+		parameter.Enum = uniqueInOrder(names)
 	}
 	return parameter
 }

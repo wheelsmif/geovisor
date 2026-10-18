@@ -56,8 +56,8 @@ func TestCanonicalMatchesMarshalWithoutJSONRoundTrip(t *testing.T) {
 	if !equalStrings(document.Tools[0].Parameters[0].Enum, original) {
 		t.Fatalf("Canonical mutated caller enum: %v", document.Tools[0].Parameters[0].Enum)
 	}
-	if !equalStrings(canonical.Tools[0].Parameters[0].Enum, []string{"a", "z"}) {
-		t.Fatalf("canonical enum = %v, want sorted unique", canonical.Tools[0].Parameters[0].Enum)
+	if !equalStrings(canonical.Tools[0].Parameters[0].Enum, []string{"z", "a"}) {
+		t.Fatalf("canonical enum = %v, want first-seen unique", canonical.Tools[0].Parameters[0].Enum)
 	}
 
 	fromCanonical, err := json.Marshal(canonical)
@@ -106,42 +106,42 @@ func TestValidateContractInvariants(t *testing.T) {
 			mutate: func(document *Document) {
 				document.Source.Kind = "file"
 			},
-			code: "invalid_source_kind",
+			code: CodeInvalidSourceKind,
 		},
 		{
 			name: "invalid coverage",
 			mutate: func(document *Document) {
 				document.FrameCoverage.Status = CoveragePartial
 			},
-			code: "missing_partial_coverage",
+			code: CodeMissingPartialCoverage,
 		},
 		{
 			name: "duplicate tool id",
 			mutate: func(document *Document) {
 				document.Tools = append(document.Tools, cloneTool(document.Tools[0]))
 			},
-			code: "duplicate_tool_id",
+			code: CodeDuplicateToolID,
 		},
 		{
 			name: "empty parameter name",
 			mutate: func(document *Document) {
 				document.Tools[0].Parameters[0].Name = ""
 			},
-			code: "required",
+			code: CodeRequired,
 		},
 		{
 			name: "invalid parameter type",
 			mutate: func(document *Document) {
 				document.Tools[0].Parameters[0].Type = "date"
 			},
-			code: "invalid_value_type",
+			code: CodeInvalidValueType,
 		},
 		{
 			name: "array missing items",
 			mutate: func(document *Document) {
 				document.Tools[0].Parameters[0].Type = ValueArray
 			},
-			code: "incompatible_shape",
+			code: CodeIncompatibleShape,
 		},
 		{
 			name: "object carrying enum",
@@ -150,7 +150,7 @@ func TestValidateContractInvariants(t *testing.T) {
 					Name: "options", Type: ValueObject, Enum: []string{"a"},
 				}}
 			},
-			code: "incompatible_shape",
+			code: CodeIncompatibleShape,
 		},
 		{
 			name: "string carrying properties",
@@ -159,7 +159,7 @@ func TestValidateContractInvariants(t *testing.T) {
 					Name: "nested", Shape: ParameterShape{Type: ValueString},
 				}}
 			},
-			code: "incompatible_shape",
+			code: CodeIncompatibleShape,
 		},
 		{
 			name: "primitive carrying enum",
@@ -168,14 +168,14 @@ func TestValidateContractInvariants(t *testing.T) {
 					Name: "flag", Type: ValueBoolean, Enum: []string{"true"},
 				}}
 			},
-			code: "incompatible_shape",
+			code: CodeIncompatibleShape,
 		},
 		{
 			name: "invalid tool id",
 			mutate: func(document *Document) {
 				document.Tools[0].ID = "invalid name"
 			},
-			code: "invalid_tool_id",
+			code: CodeInvalidToolID,
 		},
 		{
 			name: "duplicate locator id",
@@ -185,42 +185,42 @@ func TestValidateContractInvariants(t *testing.T) {
 				duplicate.Locators = []LocatorCandidate{document.Tools[0].Locators[0]}
 				document.Tools = append(document.Tools, duplicate)
 			},
-			code: "duplicate_locator_id",
+			code: CodeDuplicateLocatorID,
 		},
 		{
 			name: "unknown locator reference",
 			mutate: func(document *Document) {
 				document.Tools[0].Actions[0].LocatorCandidateIDs = []string{"missing"}
 			},
-			code: "unknown_locator",
+			code: CodeUnknownLocator,
 		},
 		{
 			name: "unknown input parameter",
 			mutate: func(document *Document) {
 				document.Tools[0].Actions[0].InputParameter = "missing"
 			},
-			code: "unknown_parameter",
+			code: CodeUnknownParameter,
 		},
 		{
 			name: "invalid action enum",
 			mutate: func(document *Document) {
 				document.Tools[0].Actions[0].Action = "hover"
 			},
-			code: "invalid_action_kind",
+			code: CodeInvalidActionKind,
 		},
 		{
 			name: "invalid side effect enum",
 			mutate: func(document *Document) {
 				document.Tools[0].Actions[0].SideEffect.Class = "destructive"
 			},
-			code: "invalid_side_effect",
+			code: CodeInvalidSideEffect,
 		},
 		{
 			name: "invalid provenance enum",
 			mutate: func(document *Document) {
 				document.Tools[0].Provenance[0].Kind = "browser"
 			},
-			code: "invalid_provenance_kind",
+			code: CodeInvalidProvenanceKind,
 		},
 		{
 			name: "unknown warning tool",
@@ -229,21 +229,21 @@ func TestValidateContractInvariants(t *testing.T) {
 					Code: "test", Message: "test", ToolID: "missing", FramePath: []FrameReference{},
 				})
 			},
-			code: "unknown_tool",
+			code: CodeUnknownTool,
 		},
 		{
 			name: "unsupported version",
 			mutate: func(document *Document) {
 				document.SchemaVersion = "0.0.0"
 			},
-			code: "unsupported_version",
+			code: CodeUnsupportedVersion,
 		},
 		{
 			name: "invalid execution boundary",
 			mutate: func(document *Document) {
 				document.Source.ExecutionBoundary = "host_daemon"
 			},
-			code: "invalid_execution_boundary",
+			code: CodeInvalidExecutionBoundary,
 		},
 		{
 			name: "inconsistent complete coverage",
@@ -253,21 +253,21 @@ func TestValidateContractInvariants(t *testing.T) {
 					Reason: "inaccessible",
 				}}
 			},
-			code: "inconsistent_complete_coverage",
+			code: CodeInconsistentCompleteCoverage,
 		},
 		{
 			name: "inconsistent unavailable coverage",
 			mutate: func(document *Document) {
 				document.FrameCoverage.Status = CoverageUnavailable
 			},
-			code: "inconsistent_unavailable_coverage",
+			code: CodeInconsistentUnavailableCoverage,
 		},
 		{
 			name: "invalid coverage status",
 			mutate: func(document *Document) {
 				document.FrameCoverage.Status = "maybe"
 			},
-			code: "invalid_coverage_status",
+			code: CodeInvalidCoverageStatus,
 		},
 		{
 			name: "duplicate frame path",
@@ -277,14 +277,14 @@ func TestValidateContractInvariants(t *testing.T) {
 					{Path: []FrameReference{{Index: 0, Name: "one"}}},
 				}
 			},
-			code: "duplicate_frame_path",
+			code: CodeDuplicateFramePath,
 		},
 		{
 			name: "duplicate parameter name",
 			mutate: func(document *Document) {
 				document.Tools[0].Parameters = append(document.Tools[0].Parameters, document.Tools[0].Parameters[0])
 			},
-			code: "duplicate_parameter_name",
+			code: CodeDuplicateParameterName,
 		},
 		{
 			name: "missing locator strategy",
@@ -292,7 +292,7 @@ func TestValidateContractInvariants(t *testing.T) {
 				document.Tools[0].Locators[0].Semantic = nil
 				document.Tools[0].Locators[0].CSSFallback = ""
 			},
-			code: "missing_locator_strategy",
+			code: CodeMissingLocatorStrategy,
 		},
 		{
 			name: "duplicate locator reference",
@@ -300,42 +300,42 @@ func TestValidateContractInvariants(t *testing.T) {
 				id := document.Tools[0].Actions[0].LocatorCandidateIDs[0]
 				document.Tools[0].Actions[0].LocatorCandidateIDs = []string{id, id}
 			},
-			code: "duplicate_locator_reference",
+			code: CodeDuplicateLocatorReference,
 		},
 		{
 			name: "duplicate enum value",
 			mutate: func(document *Document) {
 				document.Tools[0].Parameters[0].Enum = []string{"alpha", "alpha"}
 			},
-			code: "duplicate_enum_value",
+			code: CodeDuplicateEnumValue,
 		},
 		{
 			name: "empty tool id",
 			mutate: func(document *Document) {
 				document.Tools[0].ID = ""
 			},
-			code: "required",
+			code: CodeRequired,
 		},
 		{
 			name: "empty tool name",
 			mutate: func(document *Document) {
 				document.Tools[0].Name = ""
 			},
-			code: "required",
+			code: CodeRequired,
 		},
 		{
 			name: "empty locator id",
 			mutate: func(document *Document) {
 				document.Tools[0].Locators[0].ID = ""
 			},
-			code: "required",
+			code: CodeRequired,
 		},
 		{
 			name: "empty warning code",
 			mutate: func(document *Document) {
 				document.Warnings = []Warning{{Code: "", Message: "missing code"}}
 			},
-			code: "required",
+			code: CodeRequired,
 		},
 		{
 			name: "empty uncovered reason",
@@ -345,7 +345,7 @@ func TestValidateContractInvariants(t *testing.T) {
 					Path: []FrameReference{{Index: 1}},
 				}}
 			},
-			code: "required",
+			code: CodeRequired,
 		},
 	}
 	for _, test := range tests {
@@ -378,8 +378,8 @@ func TestFramePathKeyIsUnambiguousAndNumeric(t *testing.T) {
 		{Path: []FrameReference{{Index: 2, Name: "earlier"}}},
 	}
 	canonicalize(document)
-	if document.FrameCoverage.Frames[0].Path[0].Index != 2 {
-		t.Fatalf("index order = %d, want 2 before 10", document.FrameCoverage.Frames[0].Path[0].Index)
+	if document.FrameCoverage.Frames[0].Path[0].Index != 10 {
+		t.Fatalf("index order = %d, want producer order preserved", document.FrameCoverage.Frames[0].Path[0].Index)
 	}
 
 	distinct := validDocument()
@@ -416,6 +416,7 @@ func validDocument() *Document {
 		Actions: []ActionBinding{{
 			Action: ActionFill, InputParameter: "query",
 			LocatorCandidateIDs: []string{"search-123-locator-123"},
+			LocatorSelection:    LocatorSelectionRanked,
 			SideEffect:          SideEffect{Class: SideEffectNone, SafeForExploration: true},
 		}},
 		Confidence: Confidence{Score: 0.9},

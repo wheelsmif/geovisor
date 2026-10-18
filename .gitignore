@@ -1,6 +1,8 @@
 # Go build and test output
 /geovisor
 /geovisor.exe
+/gv
+/gv.exe
 *.test
 *.out
 *.prof
@@ -15,10 +17,8 @@
 .vscode/
 .idea/
 
-# Future TypeScript client output
+# Node
 /node_modules/
-client/node_modules/
-client/dist/
 
 # Operating system files
 .DS_Store

@@ -492,9 +492,10 @@ func TestCompileDropsLowValueActions(t *testing.T) {
 				linkInteraction("10.1000/xyz123", "https://doi.org/10.1000/xyz123"),
 				linkInteraction("RFC 9110", "/wiki/RFC_9110"),
 				{
-					Kind: observation.InteractionAction,
-					Role: "link",
-					Name: "See also",
+					Kind:         observation.InteractionAction,
+					Role:         "link",
+					Name:         "See also",
+					CitationHref: true,
 					Locators: []observation.Locator{{
 						Semantic: &observation.SemanticLocator{Role: "link", Name: "See also"},
 						CSS:      `a[href="#cite_note-HTML-1"]`,
@@ -653,6 +654,15 @@ func TestCompileFamilyTargetOrdinalsAreBijective(t *testing.T) {
 	if len(tool.Locators) != 2 {
 		t.Fatalf("locators = %d, want one per member", len(tool.Locators))
 	}
+	if tool.Locators[0].Semantic == nil || tool.Locators[0].Semantic.Nth != 0 {
+		t.Fatalf("first family member = %#v, want document-order nth 0", tool.Locators[0].Semantic)
+	}
+	if tool.Locators[1].Semantic == nil || tool.Locators[1].Semantic.Nth != 1 {
+		t.Fatalf("second family member = %#v, want document-order nth 1", tool.Locators[1].Semantic)
+	}
+	if tool.Actions[0].LocatorSelection != tir.LocatorSelectionByTargetName {
+		t.Fatalf("locatorSelection = %q, want by_target_name", tool.Actions[0].LocatorSelection)
+	}
 }
 
 func TestCompileOmitsFamilyEnumAboveCap(t *testing.T) {
@@ -674,8 +684,8 @@ func TestCompileOmitsFamilyEnumAboveCap(t *testing.T) {
 	if len(tool.Parameters[0].Enum) != 0 {
 		t.Fatalf("enum length = %d, want omitted above cap", len(tool.Parameters[0].Enum))
 	}
-	if tool.Description != familyToolDescription() {
-		t.Fatalf("description = %q, want target-name guidance", tool.Description)
+	if tool.Description != familyToolDescription("link", tir.ActionClick) {
+		t.Fatalf("description = %q, want the link action description", tool.Description)
 	}
 	if len(tool.Locators) != familyEnumCap+1 {
 		t.Fatalf("locators = %d, want every family member", len(tool.Locators))
@@ -785,6 +795,8 @@ func cloneInput(input Input) Input {
 }
 
 func shuffleInput(random *rand.Rand, input *Input) {
+	// Frames and evidence are sets. Tool, parameter, action, and enum order
+	// follow the source and must not be shuffled.
 	random.Shuffle(len(input.Batches), func(i, j int) {
 		input.Batches[i], input.Batches[j] = input.Batches[j], input.Batches[i]
 	})
@@ -793,24 +805,11 @@ func shuffleInput(random *rand.Rand, input *Input) {
 		random.Shuffle(len(batch.Frames), func(i, j int) {
 			batch.Frames[i], batch.Frames[j] = batch.Frames[j], batch.Frames[i]
 		})
-		random.Shuffle(len(batch.Interactions), func(i, j int) {
-			batch.Interactions[i], batch.Interactions[j] = batch.Interactions[j], batch.Interactions[i]
-		})
 		for interactionIndex := range batch.Interactions {
 			interaction := &batch.Interactions[interactionIndex]
-			random.Shuffle(len(interaction.Parameters), func(i, j int) {
-				interaction.Parameters[i], interaction.Parameters[j] = interaction.Parameters[j], interaction.Parameters[i]
-			})
-			random.Shuffle(len(interaction.Actions), func(i, j int) {
-				interaction.Actions[i], interaction.Actions[j] = interaction.Actions[j], interaction.Actions[i]
-			})
 			random.Shuffle(len(interaction.Evidence), func(i, j int) {
 				interaction.Evidence[i], interaction.Evidence[j] = interaction.Evidence[j], interaction.Evidence[i]
 			})
-			for parameterIndex := range interaction.Parameters {
-				enum := interaction.Parameters[parameterIndex].Enum
-				random.Shuffle(len(enum), func(i, j int) { enum[i], enum[j] = enum[j], enum[i] })
-			}
 			for locatorIndex := range interaction.Locators {
 				evidence := interaction.Locators[locatorIndex].Evidence
 				random.Shuffle(len(evidence), func(i, j int) { evidence[i], evidence[j] = evidence[j], evidence[i] })

@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 )
 
-// Canonical returns a cloned, normalized, ordered, and validated document
-// without marshaling. Caller-owned data is left unchanged.
+// Canonical returns a cloned, normalized, deduplicated, and validated document
+// without marshaling. It does not reorder collections: the producer owns
+// tool, parameter, action, enum, warning, frame, and provenance order.
+// Caller-owned data is left unchanged.
 func Canonical(document *Document) (*Document, error) {
 	cloned := Clone(document)
 	if cloned == nil {
@@ -23,8 +24,8 @@ func Canonical(document *Document) (*Document, error) {
 }
 
 // Marshal returns compact canonical JSON without a trailing newline. It clones,
-// normalizes, orders, and validates the document, leaving caller-owned data
-// unchanged.
+// normalizes, deduplicates, and validates the document, leaving caller-owned
+// data unchanged. It does not sort.
 func Marshal(document *Document) ([]byte, error) {
 	cloned, err := Canonical(document)
 	if err != nil {
@@ -77,21 +78,6 @@ func Clone(document *Document) *Document {
 }
 
 func canonicalize(document *Document) {
-	sort.Slice(document.FrameCoverage.Frames, func(i, j int) bool {
-		return framePathKey(document.FrameCoverage.Frames[i].Path) <
-			framePathKey(document.FrameCoverage.Frames[j].Path)
-	})
-	sort.Slice(document.FrameCoverage.Uncovered, func(i, j int) bool {
-		return framePathKey(document.FrameCoverage.Uncovered[i].Path) <
-			framePathKey(document.FrameCoverage.Uncovered[j].Path)
-	})
-	sort.Slice(document.Tools, func(i, j int) bool {
-		return document.Tools[i].ID < document.Tools[j].ID
-	})
-	sort.Slice(document.Warnings, func(i, j int) bool {
-		left, right := document.Warnings[i], document.Warnings[j]
-		return warningKey(left) < warningKey(right)
-	})
 	for i := range document.Tools {
 		canonicalizeTool(&document.Tools[i])
 	}
@@ -105,13 +91,10 @@ func canonicalizeTool(tool *Tool) {
 	for i := range tool.Locators {
 		tool.Locators[i].Provenance = canonicalProvenance(tool.Locators[i].Provenance)
 	}
-	sort.SliceStable(tool.Actions, func(i, j int) bool {
-		return actionKey(tool.Actions[i]) < actionKey(tool.Actions[j])
-	})
 }
 
 func canonicalizeParameter(parameter *Parameter) {
-	parameter.Enum = sortedUnique(parameter.Enum)
+	parameter.Enum = uniqueInOrder(parameter.Enum)
 	if parameter.Items != nil {
 		canonicalizeShape(parameter.Items)
 	}
@@ -121,7 +104,7 @@ func canonicalizeParameter(parameter *Parameter) {
 }
 
 func canonicalizeShape(shape *ParameterShape) {
-	shape.Enum = sortedUnique(shape.Enum)
+	shape.Enum = uniqueInOrder(shape.Enum)
 	if shape.Items != nil {
 		canonicalizeShape(shape.Items)
 	}
@@ -130,54 +113,42 @@ func canonicalizeShape(shape *ParameterShape) {
 	}
 }
 
-// canonicalProvenance returns a sorted copy of items with duplicate keys
-// removed. It does not mutate the argument.
+// canonicalProvenance returns a copy of items with duplicate keys removed,
+// keeping the first occurrence. It does not mutate the argument and does not
+// sort: the producer chooses provenance order.
 func canonicalProvenance(items []Provenance) []Provenance {
 	if len(items) == 0 {
 		return items
 	}
-	sorted := append([]Provenance(nil), items...)
-	sort.Slice(sorted, func(i, j int) bool {
-		return provenanceKey(sorted[i]) < provenanceKey(sorted[j])
-	})
-	result := make([]Provenance, 0, len(sorted))
-	for _, item := range sorted {
-		if len(result) == 0 || provenanceKey(result[len(result)-1]) != provenanceKey(item) {
-			result = append(result, item)
+	seen := make(map[string]struct{}, len(items))
+	result := make([]Provenance, 0, len(items))
+	for _, item := range items {
+		key := provenanceKey(item)
+		if _, exists := seen[key]; exists {
+			continue
 		}
+		seen[key] = struct{}{}
+		result = append(result, item)
 	}
 	return result
 }
 
-// sortedUnique returns a sorted copy of values with duplicates removed. It
-// does not mutate the argument.
-func sortedUnique(values []string) []string {
+// uniqueInOrder returns a copy of values with duplicates removed, keeping the
+// first occurrence. It does not mutate the argument and does not sort.
+func uniqueInOrder(values []string) []string {
 	if len(values) == 0 {
 		return values
 	}
-	sorted := append([]string(nil), values...)
-	sort.Strings(sorted)
-	result := make([]string, 0, len(sorted))
-	for _, value := range sorted {
-		if len(result) == 0 || result[len(result)-1] != value {
-			result = append(result, value)
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
 		}
+		seen[value] = struct{}{}
+		result = append(result, value)
 	}
 	return result
-}
-
-func warningKey(warning Warning) string {
-	return warning.Code + "\x00" + warning.ToolID + "\x00" +
-		framePathKey(warning.FramePath) + "\x00" + warning.Message
-}
-
-func actionKey(action ActionBinding) string {
-	key := string(action.Action) + "\x00" + action.InputParameter + "\x00" +
-		string(action.SideEffect.Class) + "\x00"
-	for _, id := range action.LocatorCandidateIDs {
-		key += id + "\x00"
-	}
-	return key + action.SideEffect.Rationale
 }
 
 func provenanceKey(provenance Provenance) string {
