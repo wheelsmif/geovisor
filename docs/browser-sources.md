@@ -34,9 +34,8 @@ runs. The phrase list is not expanded without a dedicated review.
 
 ## Chrome discovery
 
-`LookPath` in `internal/browser/lookpath.go` searches a per-OS list copied from
-go-rod's `launcher.LookPath`, then an extra Windows path list. This module does
-not import `rod/lib/launcher`. A path that contains a slash or is absolute is
+`LookPath` in `internal/browser/lookpath.go` searches a per-OS list, then an
+extra Windows path list. A path that contains a slash or is absolute is
 accepted when `os.Stat` finds a file. A bare name is resolved with
 `exec.LookPath`. `--browser-executable` / `ExecutablePath` still wins and skips
 discovery.
@@ -86,13 +85,6 @@ Headless mode adds `--headless`. Stealth, when requested, passes
 `--disable-blink-features=AutomationControlled` and does not pass
 `--enable-automation`. Stealth removes common automation markers. It does not
 promise to bypass bot detection, challenges, or access controls.
-
-Nothing in this module imports `rod/lib/launcher`. The `geovisor` binary's
-import graph does not include `github.com/ysmood/leakless` or
-`github.com/ysmood/fetchup`. `go.mod`'s require block does not list them.
-`go.sum` still has their checksums because `go mod why` reaches them through
-`github.com/go-rod/rod/lib/cdp`'s tests, which import
-`github.com/go-rod/rod/lib/launcher`.
 
 After a successful launch, cleanup requests `Browser.close`, closes the CDP
 transport, kills any remaining owned process tree, and removes the isolated

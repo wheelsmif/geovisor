@@ -4,7 +4,7 @@
 `internal/compiler.Compile` accepts all observation batches for one session and
 produces canonical TIR. The compiler emits tools, parameters, actions, and enum
 values in source order. `tir.Canonical` clones, normalizes, deduplicates, and
-validates. It does not sort. Producers own stable ordering (ADR 0002).
+validates. It does not sort. Producers own stable ordering.
 
 Parameter and object-property order follows `SourceOrder` when the observation
 sets it. The extractor records document order that way. Without `SourceOrder`,
@@ -129,8 +129,8 @@ safe, and the compiler forces it false for navigation, submission, and
 
 ## Warnings
 
-Browser diagnostics that used to exist only on stderr are now also TIR
-warnings. Standard error still prints every diagnostic. The codes below are
+Browser diagnostics are TIR warnings, and standard error prints every
+diagnostic. The codes below are
 the ones this tree emits. Messages are the exact strings in the compiler,
 extractor, and browser source.
 

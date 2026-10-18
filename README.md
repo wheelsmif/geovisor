@@ -214,12 +214,7 @@ model input.
 
 Launch starts Chromium with `os/exec` (`internal/browser/launch.go`) and reads
 `DevToolsActivePort`. Attach closes GEO-Visor's CDP transport and detaches the
-sessions it opened. Nothing in this module imports `rod/lib/launcher`. The
-`geovisor` binary's import graph does not include `github.com/ysmood/leakless`
-or `github.com/ysmood/fetchup`. `go.mod`'s require block does not list them.
-`go.sum` still has their checksums because `go mod why` reaches them through
-`github.com/go-rod/rod/lib/cdp`'s tests, which import
-`github.com/go-rod/rod/lib/launcher`.
+sessions it opened.
 
 ## Streams and exit status
 
@@ -288,8 +283,7 @@ names; see `docs/releasing.md`.
 
 See also `docs/product-spec.md`, `docs/architecture.md`,
 `docs/format-tir-json.md`, `docs/format-mcp.md`, `docs/format-openai.md`,
-and `docs/adr`. Browser sources and the compiler are described in
-`docs/browser-sources.md` and `docs/compiler.md`.
+`docs/browser-sources.md`, and `docs/compiler.md`.
 
 ## License
 

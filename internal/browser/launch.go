@@ -13,8 +13,7 @@ import (
 	"time"
 )
 
-// ownedBrowser starts one Chromium process with os/exec. It never imports
-// rod/lib/launcher, so leakless is not linked into the binary.
+// ownedBrowser starts one Chromium process with os/exec.
 type ownedBrowser struct {
 	ctx        context.Context
 	executable string
@@ -95,8 +94,8 @@ func (process *ownedBrowser) args() []string {
 	return args
 }
 
-// command is the process that Launch would start. Tests use it to prove the
-// binary is Chromium itself and that no leakless helper is on the command line.
+// command is the process that Launch would start. Tests use it to check the
+// executable and its arguments.
 func (process *ownedBrowser) command() *exec.Cmd {
 	return exec.Command(process.executable, process.args()...)
 }

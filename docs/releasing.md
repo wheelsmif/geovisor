@@ -52,4 +52,4 @@ SHA-256 checksums.
 
 Release builds never execute Chromium. A later `inspect` launch starts
 Chromium with `os/exec` in `internal/browser/launch.go` and reads
-`DevToolsActivePort`. The module does not import `rod/lib/launcher`.
+`DevToolsActivePort`.

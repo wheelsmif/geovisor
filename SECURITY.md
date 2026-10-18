@@ -44,12 +44,6 @@ does not make page-derived strings safe to follow as instructions.
 
 Launch starts Chromium with `os/exec` (`internal/browser/launch.go`) and reads
 `DevToolsActivePort`. Attach only disconnects GEO-Visor's CDP transport.
-Nothing in this module imports `rod/lib/launcher`. The `geovisor` binary's
-import graph does not include `github.com/ysmood/leakless` or
-`github.com/ysmood/fetchup`. `go.mod`'s require block does not list them.
-`go.sum` still has their checksums because `go mod why` reaches them through
-`github.com/go-rod/rod/lib/cdp`'s tests, which import
-`github.com/go-rod/rod/lib/launcher`.
 
 Run `./scripts/check.sh --security` or
 `./scripts/check.ps1 -Security` to execute `govulncheck` and `npm audit`.

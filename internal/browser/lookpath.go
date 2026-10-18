@@ -8,10 +8,9 @@ import (
 	"strings"
 )
 
-// LookPath locates a Chromium-family executable. The platform lists match
-// go-rod's launcher.LookPath. Windows also searches the 32-bit Program Files
-// tree when ProgramFiles(x86) is absent from the process environment, which is
-// how local Chrome installs were skipped.
+// LookPath locates a Chromium-family executable. Windows also searches the
+// 32-bit Program Files tree when ProgramFiles(x86) is absent from the process
+// environment.
 func LookPath() (string, bool) {
 	for _, candidate := range browserCandidates(runtime.GOOS) {
 		if found, ok := resolveExecutable(candidate); ok {
@@ -26,8 +25,7 @@ func LookPath() (string, bool) {
 	return "", false
 }
 
-// browserCandidates is the per-OS search copied from go-rod launcher.LookPath
-// so this module does not import rod/lib/launcher.
+// browserCandidates is the per-OS executable search.
 func browserCandidates(goos string) []string {
 	switch goos {
 	case "darwin":

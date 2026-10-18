@@ -37,4 +37,4 @@ browser sources and output emitters at the edges.
   `internal/payload/extractor.js`.
 - Keep `schemas/*.json` in sync with the Go DTOs.
 
-Keep changes aligned with `docs/product-spec.md` and accepted ADRs.
+Keep changes aligned with `docs/product-spec.md`.

@@ -168,9 +168,9 @@ func observeTarget(
 	return result, nil
 }
 
-// appendDiagnosticWarnings copies the diagnostics that previously existed only
-// on stderr into the observation batch so the compiler can emit them as TIR
-// warnings. Frame-uncovered diagnostics that already become uncovered frames
+// appendDiagnosticWarnings copies browser diagnostics onto the observation
+// batch so the compiler emits them as TIR warnings. Frame-uncovered
+// diagnostics that already become uncovered frames
 // are not copied, except the target-list failure that discovers no frames.
 func appendDiagnosticWarnings(batch *observation.Batch, diagnostics []Diagnostic) {
 	for _, diagnostic := range diagnostics {
