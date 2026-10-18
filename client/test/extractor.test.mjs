@@ -447,7 +447,7 @@ test("does not claim contenteditable divs from a raw form attribute", async () =
 
   const batch = await dom.window.__GEOVISOR_EXTRACT__();
   assert.deepEqual(
-    Array.from(interactions(batch, "form")[0].parameters, (parameter) => parameter.name),
+    Array.from(interactions(batch, "form"), (item) => item.name),
     [],
   );
   assert.deepEqual(
@@ -601,7 +601,10 @@ test("omits file inputs instead of emitting a string fill", async () => {
     <input aria-label="Visible">
   `);
   const batch = await dom.window.__GEOVISOR_EXTRACT__();
-  assert.equal(interactions(batch, "form")[0].parameters.length, 0);
+  assert.deepEqual(
+    Array.from(interactions(batch, "form"), (item) => item.name),
+    [],
+  );
   assert.deepEqual(
     Array.from(interactions(batch, "control"), (item) => item.name),
     ["Visible"],
