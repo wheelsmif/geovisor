@@ -186,6 +186,49 @@ test("checkbox labeled Target stays a boolean while a family target stays a name
   assert.equal(box.checked, false);
 });
 
+test("family target ordinals skip a literal Name (2)", async () => {
+  const { executeTool } = await loadRuntime();
+  const dom = new JSDOM(
+    `<a href="/a">Docs</a><a href="/b">Docs</a><a href="/c">Docs (2)</a>`,
+    { url: "https://example.test/" },
+  );
+  const clicks = [];
+  for (const anchor of dom.window.document.querySelectorAll("a")) {
+    anchor.addEventListener("click", (event) => {
+      event.preventDefault();
+      clicks.push(anchor.getAttribute("href"));
+    });
+  }
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  const definition = {
+    name: "follow_link",
+    description: "Follow one of this page's links",
+    inputSchema: {
+      type: "object",
+      properties: {
+        target: { type: "string", enum: ["Docs", "Docs (3)", "Docs (2)"] },
+      },
+      required: ["target"],
+    },
+    actions: [{
+      action: "click",
+      inputParameter: "target",
+      locatorSelection: "by_target_name",
+      locatorCandidateIds: ["a", "b", "c"],
+    }],
+    locators: [
+      { id: "a", framePath: [], shadowPath: [], semantic: { role: "link", name: "Docs", nth: 0 } },
+      { id: "b", framePath: [], shadowPath: [], semantic: { role: "link", name: "Docs", nth: 1 } },
+      { id: "c", framePath: [], shadowPath: [], semantic: { role: "link", name: "Docs (2)", nth: 0 } },
+    ],
+  };
+  await executeTool(definition, { target: "Docs (2)" });
+  assert.deepEqual(clicks, ["/c"]);
+  await executeTool(definition, { target: "Docs (3)" });
+  assert.deepEqual(clicks, ["/c", "/b"]);
+});
+
 test("execute throws before applying when a required parameter is missing", async () => {
   const { executeTool } = await loadRuntime();
   const dom = new JSDOM(`<input aria-label="Query" value="keep">`, { url: "https://example.test/" });

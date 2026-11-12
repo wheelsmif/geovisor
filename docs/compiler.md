@@ -91,10 +91,11 @@ name the targets. With 1 to 64 names the text is
 `Accessible name of the control to use: ` plus the names joined by `, `.
 With no names, or more than 64, it is `Accessible name of the control to use`
 and the enum is omitted. When the enum is present it is those names in
-document order, keeping the first occurrence of a duplicate. The first control
-keeps the bare accessible name. Later duplicates are `Name (2)`, `Name (3)`,
-and so on. Those ordinals are not part of the tool id. Locator candidates line
-up with that enum.
+document order. The first control with a given accessible name keeps that
+name. Later duplicates are `Name (2)`, `Name (3)`, and so on, skipping an
+ordinal that is already an accessible name in the family so each candidate
+keeps its own enum value. Those ordinals are not part of the tool id. Locator
+candidates line up with that enum. The apply harness assigns the same names.
 
 The family's click or check binding sets `inputParameter` to `target` and
 `locatorSelection` to `by_target_name`: the parameter value selects one
@@ -146,6 +147,9 @@ Copied from the observation batch:
   reason `interaction limit reached before every control was recorded`, which
   is partial coverage.
 - `closed_shadow_root`: `closed shadow root on ` plus the host label
+- `closed_shadow_scan_unavailable`: `closed shadow roots could not be scanned in this frame`.
+  The pierce failed or returned no document. Light-DOM tools from that frame
+  stay, and the frame stays covered.
 - `dom_not_quiet`: `DOM continued changing until the bounded quiet-check deadline`
 - `access_interstitial`: `page content resembles a bot challenge or access interstitial`
 - `frame_uncovered` from the browser, only for the target-list failure:

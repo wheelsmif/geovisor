@@ -82,10 +82,21 @@ func selectTarget(
 			}
 		}
 	case SelectExactURL:
+		var match *proto.TargetTargetInfo
 		for _, candidate := range candidates {
-			if candidate.URL == selector.URL {
-				return candidate, nil
+			if candidate.URL != selector.URL {
+				continue
 			}
+			if match != nil {
+				return nil, fmt.Errorf(
+					"multiple top-level pages match %s; pass --target id:<id>",
+					selector.URL,
+				)
+			}
+			match = candidate
+		}
+		if match != nil {
+			return match, nil
 		}
 	case SelectActiveTopLevel:
 		if len(candidates) == 1 {

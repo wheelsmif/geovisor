@@ -77,6 +77,9 @@ func validateDocument(d *Document) error {
 			}
 			locatorIDs[locator.ID] = struct{}{}
 			localLocators[locator.ID] = struct{}{}
+			if err := validateCSSFallback(locatorPath+".cssFallback", locator.CSSFallback); err != nil {
+				return err
+			}
 			if locator.Semantic == nil && strings.TrimSpace(locator.CSSFallback) == "" {
 				return invalid(locatorPath, "missing_locator_strategy", "semantic or cssFallback is required")
 			}
@@ -226,6 +229,9 @@ func validateFramePath(field string, path []FrameReference) error {
 func validatePathNodes(field string, nodes []PathNode) error {
 	for i, node := range nodes {
 		path := fmt.Sprintf("%s[%d]", field, i)
+		if err := validateCSSFallback(path+".cssFallback", node.CSSFallback); err != nil {
+			return err
+		}
 		if node.Semantic == nil && strings.TrimSpace(node.CSSFallback) == "" {
 			return invalid(path, "missing_path_strategy", "semantic or cssFallback is required")
 		}
@@ -237,6 +243,13 @@ func validatePathNodes(field string, nodes []PathNode) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func validateCSSFallback(field, value string) error {
+	if value != "" && strings.TrimSpace(value) == "" {
+		return invalid(field, "invalid_css_fallback", "must contain a non-whitespace character")
 	}
 	return nil
 }

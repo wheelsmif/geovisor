@@ -54,8 +54,12 @@ func observeTarget(
 	if err := (proto.PageEnable{}).Call(rootSession); err != nil {
 		return Result{}, operationError(ctx, ErrorReadiness, "page.enable", "enable page observation", err)
 	}
-	var loaderID proto.NetworkLoaderID
+	var navigateLoader proto.NetworkLoaderID
+	var previousLoader proto.NetworkLoaderID
 	if options.navigate {
+		if loader, err := mainFrameLoaderID(rootSession); err == nil {
+			previousLoader = loader
+		}
 		response, err := (proto.PageNavigate{URL: options.requestedURL}).Call(rootSession)
 		if err != nil {
 			return Result{}, operationError(ctx, ErrorNavigation, "page.navigate", "navigate target", err)
@@ -66,9 +70,9 @@ func observeTarget(
 				errors.New(response.ErrorText), options.requestedURL,
 			)
 		}
-		loaderID = response.LoaderID
+		navigateLoader = response.LoaderID
 	}
-	if err := waitForDocumentReady(ctx, rootSession, loaderID); err != nil {
+	if err := waitForDocumentReady(ctx, rootSession, navigateLoader, previousLoader); err != nil {
 		return Result{}, operationError(ctx, ErrorReadiness, "page.load", "wait for document load", err)
 	}
 
@@ -134,12 +138,7 @@ func observeTarget(
 			batch.Interactions = append(batch.Interactions, extracted.Interactions...)
 			batch.Warnings = append(batch.Warnings, extracted.Warnings...)
 			if interactionLimitHit(extracted) {
-				fact.Accessible = false
-				fact.Reason = "interaction limit reached before every control was recorded"
-				result.Diagnostics = append(result.Diagnostics, Diagnostic{
-					Code: DiagnosticFrameUncovered, Severity: SeverityWarning, Message: fact.Reason,
-					FramePath: cloneFramePath(frame.path),
-				})
+				result.Diagnostics = append(result.Diagnostics, uncoverForInteractionLimit(&fact))
 			}
 		}
 		batch.Frames = append(batch.Frames, fact)
@@ -200,6 +199,15 @@ func interactionLimitHit(batch observation.Batch) bool {
 		}
 	}
 	return false
+}
+
+func uncoverForInteractionLimit(fact *observation.Frame) Diagnostic {
+	fact.Accessible = false
+	fact.Reason = "interaction limit reached before every control was recorded"
+	return Diagnostic{
+		Code: DiagnosticFrameUncovered, Severity: SeverityWarning, Message: fact.Reason,
+		FramePath: cloneFramePath(fact.Path),
+	}
 }
 
 func waitForMissingOOPIFs(
@@ -291,9 +299,24 @@ func evaluateIsolated(
 	if err != nil {
 		return nil, err
 	}
+	return callIsolated(session, world.ExecutionContextID, expression, awaitPromise, timeout)
+}
+
+// callIsolated evaluates in one isolated world. A zero context id is rejected
+// so a call cannot fall through to the page's main world.
+func callIsolated(
+	session *sessionClient,
+	contextID proto.RuntimeExecutionContextID,
+	expression string,
+	awaitPromise bool,
+	timeout proto.RuntimeTimeDelta,
+) (*proto.RuntimeEvaluateResult, error) {
+	if contextID == 0 {
+		return nil, errors.New("isolated world context is required")
+	}
 	params := proto.RuntimeEvaluate{
 		Expression:    expression,
-		ContextID:     world.ExecutionContextID,
+		ContextID:     contextID,
 		AwaitPromise:  awaitPromise,
 		ReturnByValue: true,
 	}
@@ -303,11 +326,15 @@ func evaluateIsolated(
 	return params.Call(session)
 }
 
-func waitForDocumentReady(ctx context.Context, session *sessionClient, loaderID proto.NetworkLoaderID) error {
+func waitForDocumentReady(
+	ctx context.Context,
+	session *sessionClient,
+	navigateLoader, previousLoader proto.NetworkLoaderID,
+) error {
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if ready, err := documentMatchesNavigation(session, loaderID); err == nil && ready {
+		if ready, err := documentMatchesNavigation(session, navigateLoader, previousLoader); err == nil && ready {
 			return nil
 		}
 		select {
@@ -318,10 +345,25 @@ func waitForDocumentReady(ctx context.Context, session *sessionClient, loaderID 
 	}
 }
 
+func mainFrameLoaderID(session *sessionClient) (proto.NetworkLoaderID, error) {
+	tree, err := (proto.PageGetFrameTree{}).Call(session)
+	if err != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
+		if err == nil {
+			err = errors.New("frame tree has no main frame")
+		}
+		return "", err
+	}
+	return tree.FrameTree.Frame.LoaderID, nil
+}
+
 // documentMatchesNavigation reports whether the session's main document is
-// complete and, after a Page.navigate, belongs to that navigation rather than
-// the launch about:blank that is already complete.
-func documentMatchesNavigation(session *sessionClient, loaderID proto.NetworkLoaderID) (bool, error) {
+// complete and, after a Page.navigate, belongs to that navigation. The
+// pre-navigation loader is what keeps an already-open page from satisfying
+// the wait before the navigation commits.
+func documentMatchesNavigation(
+	session *sessionClient,
+	navigateLoader, previousLoader proto.NetworkLoaderID,
+) (bool, error) {
 	frameID, err := sessionMainFrameID(session)
 	if err != nil {
 		return false, err
@@ -330,25 +372,29 @@ func documentMatchesNavigation(session *sessionClient, loaderID proto.NetworkLoa
 	if err != nil || result.ExceptionDetails != nil || result.Result == nil || !result.Result.Value.Bool() {
 		return false, err
 	}
-	if loaderID == "" {
+	if navigateLoader == "" {
 		return true, nil
 	}
-	tree, err := (proto.PageGetFrameTree{}).Call(session)
-	if err != nil || tree.FrameTree == nil || tree.FrameTree.Frame == nil {
+	frameLoader, err := mainFrameLoaderID(session)
+	if err != nil {
 		return false, err
 	}
-	frame := tree.FrameTree.Frame
-	if frame.LoaderID == loaderID {
-		return true, nil
-	}
-	// A redirect commits a different loader than Page.navigate returned. Accept
-	// that committed document once it is no longer the pre-navigation blank.
-	return frame.LoaderID != "" && !isAboutBlankURL(frame.URL), nil
+	return navigationCommitted(navigateLoader, previousLoader, frameLoader), nil
 }
 
-func isAboutBlankURL(raw string) bool {
-	trimmed := strings.TrimSpace(raw)
-	return trimmed == "" || trimmed == "about:blank"
+// navigationCommitted is true when the main frame has left the loader it had
+// before Page.navigate. An exact match on the loader Page.navigate returned
+// is the usual commit. A redirect commits some other new loader, which is
+// accepted only when it differs from the pre-navigation loader. The page that
+// was already open keeps that previous loader and is not accepted.
+func navigationCommitted(navigateLoader, previousLoader, frameLoader proto.NetworkLoaderID) bool {
+	if navigateLoader == "" {
+		return true
+	}
+	if frameLoader != "" && frameLoader == navigateLoader {
+		return true
+	}
+	return previousLoader != "" && frameLoader != "" && frameLoader != previousLoader
 }
 
 func waitForDOMQuiet(
@@ -962,18 +1008,15 @@ func extractFrame(
 		return observation.Batch{}, DiagnosticFrameUncovered,
 			"browser could not create an isolated execution world for this frame"
 	}
-	installed, err := (proto.RuntimeEvaluate{
-		Expression: payload.BrowserBundle(), ContextID: world.ExecutionContextID,
-		ReturnByValue: true,
-	}).Call(&session)
+	installed, err := callIsolated(&session, world.ExecutionContextID, payload.BrowserBundle(), false, 0)
 	if err != nil || installed.ExceptionDetails != nil {
 		return observation.Batch{}, DiagnosticFrameUncovered,
 			"browser payload installation failed in this frame"
 	}
-	available, err := (proto.RuntimeEvaluate{
-		Expression: "typeof globalThis.__GEOVISOR_EXTRACT__ === 'function'",
-		ContextID:  world.ExecutionContextID, ReturnByValue: true,
-	}).Call(&session)
+	available, err := callIsolated(
+		&session, world.ExecutionContextID,
+		"typeof globalThis.__GEOVISOR_EXTRACT__ === 'function'", false, 0,
+	)
 	if err != nil || available.ExceptionDetails != nil || available.Result == nil ||
 		!available.Result.Value.Bool() {
 		return observation.Batch{}, DiagnosticFrameUncovered,
@@ -983,10 +1026,7 @@ func extractFrame(
 	encodedOptions, _ := json.Marshal(options)
 	invocation := "(async () => JSON.stringify(await globalThis.__GEOVISOR_EXTRACT__(" +
 		string(encodedOptions) + ")))()"
-	extracted, err := (proto.RuntimeEvaluate{
-		Expression: invocation, ContextID: world.ExecutionContextID,
-		AwaitPromise: true, ReturnByValue: true,
-	}).Call(&session)
+	extracted, err := callIsolated(&session, world.ExecutionContextID, invocation, true, 0)
 	if err != nil {
 		return observation.Batch{}, DiagnosticFrameUncovered, extractionEvaluateReason(ctx, err)
 	}
@@ -1065,7 +1105,13 @@ func closedShadowWarnings(
 ) []observation.Warning {
 	document := piercedDocument(session)
 	if document == nil {
-		return nil
+		// The light-DOM tools already extracted stay. Marking the frame
+		// uncovered would drop them, and the same path cannot be both covered
+		// and uncovered. The missed pierce is a warning instead.
+		return []observation.Warning{{
+			Code:    observation.WarningClosedShadowScanUnavailable,
+			Message: "closed shadow roots could not be scanned in this frame",
+		}}
 	}
 	return collectClosedShadows(document, frameID)
 }
@@ -1170,10 +1216,11 @@ func accessInterstitial(frame discoveredFrame) bool {
 	if err != nil {
 		return false
 	}
-	result, err := (proto.RuntimeEvaluate{
-		Expression: `(document.title + "\n" + (document.body?.innerText || "")).slice(0, 8192).toLowerCase()`,
-		ContextID:  world.ExecutionContextID, ReturnByValue: true,
-	}).Call(frame.session)
+	result, err := callIsolated(
+		frame.session, world.ExecutionContextID,
+		`(document.title + "\n" + (document.body?.innerText || "")).slice(0, 8192).toLowerCase()`,
+		false, 0,
+	)
 	if err != nil || result.ExceptionDetails != nil || result.Result == nil {
 		return false
 	}

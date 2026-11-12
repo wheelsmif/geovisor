@@ -6,7 +6,7 @@ alwaysApply: false
 
 # Go Quality
 
-- Target the Go version in `.go-version`. The `toolchain` line in `go.mod` pins 1.26.9.
+- Target the Go version in `.go-version`. The `toolchain` line in `go.mod` pins 1.26.11.
 - Keep packages cohesive and dependencies minimal.
 - Accept interfaces at boundaries; return concrete types by default.
 - Wrap errors with context and expose typed errors when callers branch on them.

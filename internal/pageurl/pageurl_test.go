@@ -15,9 +15,17 @@ func TestPageURLStripsQueryAndFragment(t *testing.T) {
 		{raw: "data:text/html,SECRET-PAGE", want: "data:"},
 		{raw: "blob:https://example.test/11111111-2222-3333-4444-555555555555", want: "blob:"},
 		{raw: "about:srcdoc", want: "about:srcdoc"},
+		{raw: "data:", want: "data:"},
+		{raw: "blob:", want: "blob:"},
+		{raw: "mailto:user@example.test", want: "mailto:"},
+		{raw: "javascript:alert(1)", want: "javascript:"},
 	} {
-		if got := PageURL(test.raw); got != test.want {
+		got := PageURL(test.raw)
+		if got != test.want {
 			t.Errorf("PageURL(%q) = %q, want %q", test.raw, got, test.want)
+		}
+		if again := PageURL(got); again != test.want {
+			t.Errorf("PageURL(PageURL(%q)) = %q, want %q", test.raw, again, test.want)
 		}
 	}
 }

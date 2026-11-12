@@ -171,24 +171,57 @@ func familyTargetParameterSpec(locators []tir.LocatorCandidate) tir.Parameter {
 		Required:    true,
 	}
 	if len(names) <= familyEnumCap {
-		parameter.Enum = uniqueInOrder(names)
+		parameter.Enum = names
 	}
 	return parameter
 }
 
+// familyTargetNames gives each locator its own enum value. The first use of an
+// accessible name keeps that name. A later duplicate becomes "Name (2)",
+// "Name (3)", and so on, skipping any candidate that is already an accessible
+// name in the family or already assigned. The apply harness in
+// client/src/apply-runtime.ts must use the same assignment.
 func familyTargetNames(locators []tir.LocatorCandidate) []string {
+	bases := make([]string, len(locators))
+	baseSet := make(map[string]struct{}, len(locators))
+	for i, locator := range locators {
+		bases[i] = familyLocatorName(locator)
+		baseSet[bases[i]] = struct{}{}
+	}
+	used := make(map[string]struct{}, len(locators))
 	counts := make(map[string]int, len(locators))
 	names := make([]string, 0, len(locators))
-	for _, locator := range locators {
-		base := familyLocatorName(locator)
+	for _, base := range bases {
 		counts[base]++
-		if counts[base] == 1 {
-			names = append(names, base)
-			continue
+		name := base
+		if counts[base] > 1 || nameTaken(used, name) {
+			n := counts[base]
+			if n < 2 {
+				n = 2
+			}
+			for {
+				candidate := fmt.Sprintf("%s (%d)", base, n)
+				if _, exists := baseSet[candidate]; exists {
+					n++
+					continue
+				}
+				if nameTaken(used, candidate) {
+					n++
+					continue
+				}
+				name = candidate
+				break
+			}
 		}
-		names = append(names, fmt.Sprintf("%s (%d)", base, counts[base]))
+		used[name] = struct{}{}
+		names = append(names, name)
 	}
 	return names
+}
+
+func nameTaken(used map[string]struct{}, name string) bool {
+	_, ok := used[name]
+	return ok
 }
 
 func familyLocatorName(locator tir.LocatorCandidate) string {

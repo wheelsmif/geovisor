@@ -12,7 +12,9 @@ execute tools.
   WebSocket.
 - Attach connects to an existing CDP endpoint and selects a top-level target by
   exact target ID, exact URL, or the sole top-level HTTP(S) page. If more than
-  one such page is open, attach fails unless the caller names the target. It
+  one such page is open, attach fails unless the caller names the target. An
+  exact URL that matches more than one tab fails the same way; the page title
+  is not a tie-break. It
   never attaches a debugger session to another tab to probe focus. Sessions
   attach only to the selected target and its descendant frames. It navigates
   only when the caller supplies `RequestedURL`. When observation finishes,
@@ -25,6 +27,8 @@ than disappearing from the result. Readiness probes and extraction run in an
 isolated world so the page cannot observe that JavaScript. Closed shadow roots
 discovered by CDP pierce are reported as batch warnings
 (`closed_shadow_root`, message `closed shadow root on ` plus a host label).
+A pierce that fails or returns no document reports
+`closed_shadow_scan_unavailable` and keeps the frame's light-DOM tools.
 
 Access-interstitial detection is a substring hint over a bounded slice of the
 root document title and body text (`verify you are human`, `checking your

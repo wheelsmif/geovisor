@@ -11,8 +11,8 @@ MCP server, and it does not ship an executor.
 
 ## Requirements
 
-- Go 1.26.9. `.go-version` is `1.26.9`. `go.mod` declares `go 1.26` and
-  `toolchain go1.26.9`.
+- Go 1.26.11. `.go-version` is `1.26.11`. `go.mod` declares `go 1.26` and
+  `toolchain go1.26.11`.
 - Node.js 24.15.0 and npm for client edits and the check scripts. `go build`
   and `go install` do not need Node. The extractor bundle
   `internal/payload/extractor.js` is committed.
@@ -245,7 +245,7 @@ Ctrl-C cancellation exits with `130`.
 - Browser extraction uses CDP and is tested with installed Chromium-compatible
   browsers.
 - Source development is pinned by `.go-version` and `.node-version` to Go
-  1.26.9 and Node.js 24.15.0.
+  1.26.11 and Node.js 24.15.0.
 
 ## Performance and reproducibility
 

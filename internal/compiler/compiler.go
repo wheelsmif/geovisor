@@ -220,6 +220,12 @@ func Compile(ctx context.Context, input Input) (*tir.Document, error) {
 			if err != nil {
 				return nil, err
 			}
+			// A form with no actions is not a tool. The extractor skips a form
+			// that has no fillable controls; Compile does the same so one empty
+			// form cannot fail the rest of the batch.
+			if interaction.Kind == observation.InteractionForm && len(prepared.actions) == 0 {
+				continue
+			}
 			preparedItems = append(preparedItems, preparedItem{
 				source:   interaction,
 				prepared: prepared,
@@ -1314,6 +1320,10 @@ func cleanDescription(value string) string {
 }
 
 func limitText(value string, limit int) string {
+	// U+FEFF is whitespace in the extractor's Unicode regex and not in
+	// strings.Fields. Strip it before matching or the two low-value checks
+	// disagree on a DOI-shaped name.
+	value = strings.ReplaceAll(value, "\uFEFF", "")
 	collapsed := strings.Join(strings.Fields(value), " ")
 	runes := []rune(collapsed)
 	if len(runes) <= limit {

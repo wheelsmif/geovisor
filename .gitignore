@@ -16,6 +16,7 @@
 .env.*
 .vscode/
 .idea/
+/.agentboard/
 
 # Node
 /node_modules/

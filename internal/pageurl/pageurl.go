@@ -31,6 +31,12 @@ func PageURL(raw string) string {
 	if parsed.Scheme == "about" && parsed.Opaque == "blank" {
 		return "about:blank"
 	}
+	// data:, blob:, mailto:, and javascript: keep the scheme only. A second
+	// pass sees that token with an empty opaque part; it must stay the token
+	// so a data: frame and a blob: frame do not collapse onto an empty src.
+	if opaqueScheme(parsed.Scheme) && parsed.Host == "" {
+		return parsed.Scheme + ":"
+	}
 	if nonHierarchical(parsed) {
 		return parsed.Scheme + ":"
 	}
@@ -74,6 +80,15 @@ func NormalizeSecurityOrigin(securityOrigin, page string) string {
 		return "about:srcdoc"
 	}
 	return ""
+}
+
+func opaqueScheme(scheme string) bool {
+	switch scheme {
+	case "data", "blob", "mailto", "javascript":
+		return true
+	default:
+		return false
+	}
 }
 
 func nonHierarchical(parsed *url.URL) bool {

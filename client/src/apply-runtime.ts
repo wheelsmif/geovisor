@@ -98,13 +98,33 @@ function familyDisplayNames(
   definition: ToolDefinition,
   locatorIDs: string[],
 ): Map<string, string> {
+  // Same assignment as familyTargetNames in internal/compiler/family.go.
+  const bases = locatorIDs.map((id) =>
+    familyLocatorName(definition.locators.find((item) => item.id === id)),
+  );
+  const baseSet = new Set(bases);
+  const used = new Set<string>();
   const counts = new Map<string, number>();
   const names = new Map<string, string>();
-  for (const id of locatorIDs) {
-    const base = familyLocatorName(definition.locators.find((item) => item.id === id));
-    const next = (counts.get(base) ?? 0) + 1;
-    counts.set(base, next);
-    names.set(id, next === 1 ? base : `${base} (${next})`);
+  for (let index = 0; index < locatorIDs.length; index += 1) {
+    const base = bases[index] ?? "Control";
+    const count = (counts.get(base) ?? 0) + 1;
+    counts.set(base, count);
+    let name = base;
+    if (count > 1 || used.has(name)) {
+      let ordinal = Math.max(count, 2);
+      for (;;) {
+        const candidate = `${base} (${ordinal})`;
+        if (!baseSet.has(candidate) && !used.has(candidate)) {
+          name = candidate;
+          break;
+        }
+        ordinal += 1;
+      }
+    }
+    used.add(name);
+    const id = locatorIDs[index];
+    if (id) names.set(id, name);
   }
   return names;
 }

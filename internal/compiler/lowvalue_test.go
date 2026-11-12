@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func TestCleanTextStripsBOMBeforeLowValueMatch(t *testing.T) {
+	t.Parallel()
+	name := cleanText("10.1000/x\uFEFFy")
+	if name != "10.1000/xy" {
+		t.Fatalf("cleaned name = %q, want the BOM removed", name)
+	}
+	if !isLowValueName(name, "link") {
+		t.Fatal("DOI name containing U+FEFF was kept")
+	}
+}
+
 func TestLowValuePatternsEmbedded(t *testing.T) {
 	t.Parallel()
 

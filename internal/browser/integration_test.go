@@ -168,7 +168,7 @@ func TestAttachPreservesBrowserAndDoesNotNavigate(t *testing.T) {
 	if navigated.ErrorText != "" {
 		t.Fatalf("navigate fixture target: %s", navigated.ErrorText)
 	}
-	if err := waitForDocumentReady(context.Background(), session, navigated.LoaderID); err != nil {
+	if err := waitForDocumentReady(context.Background(), session, navigated.LoaderID, ""); err != nil {
 		t.Fatalf("wait fixture target: %v", err)
 	}
 	detachTarget(connection.browser, session.sessionID)

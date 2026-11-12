@@ -49,6 +49,10 @@ func newOwnedLauncher(
 	}
 }
 
+func applyStealth(process *ownedBrowser) {
+	process.Set("disable-blink-features", "AutomationControlled")
+}
+
 func (process *ownedBrowser) Set(name string, values ...string) *ownedBrowser {
 	if len(values) == 0 {
 		process.flags[name] = nil

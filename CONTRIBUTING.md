@@ -2,7 +2,7 @@
 
 ## Development setup
 
-Install Go 1.26.9 (`.go-version`; `go.mod` has `toolchain go1.26.9`), Node.js
+Install Go 1.26.11 (`.go-version`; `go.mod` has `toolchain go1.26.11`), Node.js
 24.15.0, npm, and a Chromium-compatible browser. `go build` and `go install`
 do not need Node; the extractor bundle is committed. Node is required for
 client edits and for the check scripts below.

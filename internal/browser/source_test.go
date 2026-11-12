@@ -152,12 +152,37 @@ func TestSelectTargetDeterministically(t *testing.T) {
 		t.Fatalf("single active target = %v, %v; want only", selected, err)
 	}
 
-	selected, err = selectTarget(
+	if _, err = selectTarget(
 		targets,
 		TargetSelector{Mode: SelectExactURL, URL: "https://a.example/"},
+	); err == nil || !strings.Contains(err.Error(), "pass --target id:<id>") {
+		t.Fatalf("duplicate exact URL error = %v, want an id: selector", err)
+	}
+
+	selected, err = selectTarget(
+		targets,
+		TargetSelector{Mode: SelectExactURL, URL: "https://z.example/"},
 	)
-	if err != nil || selected.TargetID != "a" {
-		t.Fatalf("exact URL target = %v, %v; want canonical duplicate a", selected, err)
+	if err != nil || selected.TargetID != "z" {
+		t.Fatalf("exact URL target = %v, %v; want z", selected, err)
+	}
+}
+
+func TestStealthLaunchAddsOnlyTheBlinkSwitch(t *testing.T) {
+	t.Parallel()
+	profile := t.TempDir()
+	plain := newOwnedLauncher(context.Background(), "chromium", profile, true, "")
+	if plain.Has("disable-blink-features") || plain.Has("enable-automation") {
+		t.Fatal("default launch must not set AutomationControlled or enable-automation")
+	}
+	stealth := newOwnedLauncher(context.Background(), "chromium", profile, true, "")
+	applyStealth(stealth)
+	flags, ok := stealth.GetFlags("disable-blink-features")
+	if !ok || len(flags) != 1 || flags[0] != "AutomationControlled" {
+		t.Fatalf("stealth blink features = %v, want only AutomationControlled", flags)
+	}
+	if stealth.Has("enable-automation") {
+		t.Fatal("stealth must not set enable-automation")
 	}
 }
 

@@ -814,3 +814,66 @@ func TestOriginForURLRejectsUnusableURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestNavigationCommittedLeavesThePreviousLoader(t *testing.T) {
+	t.Parallel()
+	const (
+		previous  proto.NetworkLoaderID = "old"
+		navigated proto.NetworkLoaderID = "new"
+		redirect  proto.NetworkLoaderID = "redirect"
+	)
+	if navigationCommitted(navigated, previous, previous) {
+		t.Fatal("the page already open satisfied the navigation wait")
+	}
+	if !navigationCommitted(navigated, previous, navigated) {
+		t.Fatal("the loader Page.navigate returned was rejected")
+	}
+	if !navigationCommitted(navigated, previous, redirect) {
+		t.Fatal("a redirect loader was rejected")
+	}
+	if navigationCommitted(navigated, "", previous) {
+		t.Fatal("an unknown previous loader accepted the page already open")
+	}
+	if !navigationCommitted("", previous, previous) {
+		t.Fatal("a same-document navigation was rejected")
+	}
+}
+
+func TestInteractionLimitUncoversTheFrame(t *testing.T) {
+	t.Parallel()
+	batch := observation.Batch{Warnings: []observation.Warning{{
+		Code: "interaction_limit", Message: "stopped after 2000 interactions in this frame",
+	}}}
+	if !interactionLimitHit(batch) {
+		t.Fatal("interaction_limit warning was ignored")
+	}
+	fact := observation.Frame{Accessible: true, Path: []observation.FrameReference{{Index: 1}}}
+	diagnostic := uncoverForInteractionLimit(&fact)
+	if fact.Accessible || fact.Reason != "interaction limit reached before every control was recorded" {
+		t.Fatalf("frame = %+v, want inaccessible with the limit reason", fact)
+	}
+	if diagnostic.Code != DiagnosticFrameUncovered || len(diagnostic.FramePath) != 1 {
+		t.Fatalf("diagnostic = %+v", diagnostic)
+	}
+	if interactionLimitHit(observation.Batch{}) {
+		t.Fatal("a batch without the warning uncovered a frame")
+	}
+}
+
+func TestClosedShadowScanFailureWarnsWithoutUncovering(t *testing.T) {
+	t.Parallel()
+	warnings := closedShadowWarnings(nil, "")
+	if len(warnings) != 1 || warnings[0].Code != observation.WarningClosedShadowScanUnavailable {
+		t.Fatalf("warnings = %+v, want closed_shadow_scan_unavailable", warnings)
+	}
+	if warnings[0].Message != "closed shadow roots could not be scanned in this frame" {
+		t.Fatalf("message = %q", warnings[0].Message)
+	}
+}
+
+func TestCallIsolatedRejectsTheMainWorld(t *testing.T) {
+	t.Parallel()
+	if _, err := callIsolated(nil, 0, "1", false, 0); err == nil {
+		t.Fatal("a zero isolated-world context was accepted")
+	}
+}

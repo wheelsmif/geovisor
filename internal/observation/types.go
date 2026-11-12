@@ -36,8 +36,9 @@ type Warning struct {
 }
 
 const (
-	WarningElementExtractionFailed = "element_extraction_failed"
-	WarningClosedShadowRoot        = "closed_shadow_root"
+	WarningElementExtractionFailed     = "element_extraction_failed"
+	WarningClosedShadowRoot            = "closed_shadow_root"
+	WarningClosedShadowScanUnavailable = "closed_shadow_scan_unavailable"
 )
 
 // Frame records whether a discovered frame could be observed.

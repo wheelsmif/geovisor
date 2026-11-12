@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+func TestValidateRejectsWhitespaceCSSFallback(t *testing.T) {
+	t.Parallel()
+
+	document := validDocument()
+	document.Tools[0].Locators[0].CSSFallback = "   "
+	if err := document.Validate(); err == nil {
+		t.Fatal("whitespace cssFallback beside a semantic locator was accepted")
+	}
+}
+
 func TestMarshalCanonicalizesWithoutMutatingCaller(t *testing.T) {
 	t.Parallel()
 

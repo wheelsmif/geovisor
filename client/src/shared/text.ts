@@ -13,7 +13,7 @@ export const DESCRIPTION_LIMIT = 512;
  */
 export function cleanText(value: string | null | undefined, limit = TEXT_LIMIT): string {
   if (!value) return "";
-  const collapsed = value.replace(/\s+/gu, " ").trim();
+  const collapsed = value.replace(/\uFEFF/gu, "").replace(/\s+/gu, " ").trim();
   const points = Array.from(collapsed);
   return points.length <= limit ? collapsed : points.slice(0, limit).join("");
 }

@@ -665,6 +665,61 @@ func TestCompileFamilyTargetOrdinalsAreBijective(t *testing.T) {
 	}
 }
 
+func TestCompileFamilyTargetNamesSkipLiteralOrdinals(t *testing.T) {
+	t.Parallel()
+
+	first := linkInteraction("Docs", "/a")
+	first.Locators[0].Semantic.Nth = 0
+	second := linkInteraction("Docs", "/b")
+	second.Locators[0].Semantic.Nth = 1
+	third := linkInteraction("Docs (2)", "/c")
+	third.Locators[0].Semantic.Nth = 2
+	document, err := Compile(context.Background(), Input{
+		Source: observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{Interactions: []observation.Interaction{
+			first, second, third,
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	tool := findToolByName(t, document, "Follow link")
+	got := tool.Parameters[0].Enum
+	want := []string{"Docs", "Docs (3)", "Docs (2)"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("target enum = %v, want %v", got, want)
+	}
+	if len(tool.Locators) != len(got) {
+		t.Fatalf("locators = %d, enum = %d, want one name per locator", len(tool.Locators), len(got))
+	}
+}
+
+func TestCompileSkipsFormWithNoActions(t *testing.T) {
+	t.Parallel()
+
+	empty := observation.Interaction{
+		Kind: observation.InteractionForm,
+		Role: "form",
+		Name: "Empty",
+		Evidence: []observation.Evidence{{
+			Kind: observation.EvidenceDOM, Reference: "dom:form", Score: 0.6,
+		}},
+	}
+	document, err := Compile(context.Background(), Input{
+		Source: observation.Source{Kind: observation.SourceLaunchURL},
+		Batches: []observation.Batch{{Interactions: []observation.Interaction{
+			empty,
+			buttonInteraction("Save", observation.SideEffectNone),
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(document.Tools) != 1 || document.Tools[0].Name != "Save" {
+		t.Fatalf("tools = %v, want only Save", toolNames(document))
+	}
+}
+
 func TestCompileOmitsFamilyEnumAboveCap(t *testing.T) {
 	t.Parallel()
 

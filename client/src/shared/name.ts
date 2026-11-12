@@ -91,7 +91,7 @@ function ownActionText(element: Element): string {
       "button, a[href], summary, [role='button'], [role='link'], [role='tab'], [role^='menuitem']",
     )
   ) {
-    return cleanText(element.textContent);
+    return subtreeNameText(element);
   }
   if (element.localName === "input") {
     const type = inputType(element);
@@ -126,10 +126,12 @@ function contextName(element: Element): string {
     const aria = cleanText(current.getAttribute("aria-label"));
     const legend =
       current.localName === "fieldset"
-        ? cleanText(read("", () => current!.querySelector(":scope > legend")?.textContent ?? ""))
+        ? subtreeNameText(read<Element | null>(null, () => current!.querySelector(":scope > legend")))
         : "";
-    const heading = cleanText(
-      read("", () => current!.querySelector(":scope > h1, :scope > h2, :scope > h3")?.textContent ?? ""),
+    const heading = subtreeNameText(
+      read<Element | null>(null, () =>
+        current!.querySelector(":scope > h1, :scope > h2, :scope > h3"),
+      ),
     );
     const name = labelled || aria || legend || heading;
     if (name) return name;

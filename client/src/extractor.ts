@@ -898,6 +898,9 @@ export async function extract(options?: ExtractionOptions): Promise<Batch> {
   const { exploration, restore } = await exploreSafely(records, normalized);
   try {
     if (exploration.details.size > 0) records = traverse(document);
+    // Names and visibility are on the records. Restore before locator CSS so a
+    // slow finder cannot leave <details> open past the frame deadline.
+    restore();
 
     // Forms claim their fillable controls first. A control owned by a form is
     // a parameter of that form's tool and is not also emitted standalone. The

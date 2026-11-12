@@ -79,7 +79,8 @@ executor.
 - Same-role, same-action families in one frame compile as one parameterized
   TIR tool with a required `target` parameter, in document order. The first
   control keeps the bare accessible name; later duplicates are `Name (2)`,
-  `Name (3)`. Descriptions are `Follow one of this page's links`,
+  `Name (3)`, skipping an ordinal that is already another control's name.
+  Descriptions are `Follow one of this page's links`,
   `Toggle one of this page's controls`, or `Click one of this page's controls`.
   Parameter descriptions can still list the target names. Links always use
   that family shape. Unique buttons and submit/reset/image-submit stay

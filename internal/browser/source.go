@@ -57,8 +57,7 @@ func (source *source) observeLaunch(parent context.Context) (result Result, err 
 	}
 	process := newOwnedLauncher(ctx, executable, profile, headless, source.launch.hostResolverRules)
 	if source.launch.Stealth {
-		process.Delete("enable-automation").
-			Set("disable-blink-features", "AutomationControlled")
+		applyStealth(process)
 	}
 
 	controlURL, err := process.Launch()

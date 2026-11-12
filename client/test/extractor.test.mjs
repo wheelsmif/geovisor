@@ -719,6 +719,14 @@ test("safe exploration restores every observed details open state", async () => 
   assert.equal(details[1].open, false);
 });
 
+test("button names skip a nested textarea value", async () => {
+  const dom = page(`<button>Save<textarea>secret draft</textarea></button>`);
+  const batch = await dom.window.__GEOVISOR_EXTRACT__();
+  const names = interactions(batch, "action").map((item) => item.name);
+  assert.ok(names.includes("Save"));
+  assert.equal(names.some((name) => name.includes("secret draft")), false);
+});
+
 test("omits citation, DOI, RFC, and unnamed cite links", async () => {
   const html = await readFile(resolve(repositoryRoot, "testdata", "corpus", "links.html"), "utf8");
   const batch = await page(html).window.__GEOVISOR_EXTRACT__();
